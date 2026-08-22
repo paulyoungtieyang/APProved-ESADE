@@ -54,6 +54,4 @@ requirements and corporate brand books.
 
 ## Team
 
-Team 3 — Fashion Icons · EMBA Cohort 2025–2027, ESADE
-
-Ema Menichelli · Giulia Raimondi · Micaela Vanes · Paul Young Tie Yang
+Giulia Raimondi · Paul Young Tie Yang
