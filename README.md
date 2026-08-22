@@ -69,7 +69,6 @@ prototype 1:1.
 | Policy News | `/policy-news` | Filterable regulatory feed focused on MDR and Spanish market access |
 | Global Value Dossier | `/global-dossier` | Section-by-section generation with live progress, three-layer prompt composition |
 | MSL Materials | `/msl-material` | Slide decks, medical summaries, scientific FAQs, email templates. Upload a corporate `.pptx`/`.potx` here to brand generated decks |
-| Bolus Calculator | `/bolus-calculator` | Demo only. Not a generated document — the demo device's own digital (dosing-support) function, documented as an IEC 62304 component alongside the hardware sensor |
 | Document Library | `/documents` | Everything generated, filtered by type / market / language. Decks download as `.pptx`, everything else as `.md` |
 | Resources | `/resources` | Regulations, guidance, standards and templates the drafts cite |
 | Submit | `/submission` | Five-step wizard: data → markets → languages → AI instructions → review |
@@ -144,14 +143,25 @@ regulatory documentation covering both:
 | Regulation | EU MDR 2017/745 (Annex II, Annex XIV, Annex III) + AEMPS |
 | Launch market | Spain, then wider EU |
 | Languages | Spanish (Castellano), English |
-| Dataset | 20 patients · 10 adverse events · 10 statistical endpoints |
+| Clinical evidence | 20 patients · 10 adverse events · 10 statistical endpoints |
+| Software evidence | 22 specification parameters · 22 verification test cases · 15 requirements |
 | Headline figures | Mean MARD 9.6% · 94.2% hypoglycaemia detection · 13.8-day wear |
 
 Every dossier section documents both functions explicitly rather than collapsing them —
 see the "Software Lifecycle & Cybersecurity" section for the digital function's IEC 62304
-and MDCG 2019-16 evidence specifically. The **Bolus Calculator** page itself is not a
-generated document — it's the demo device's own digital function, kept out of the real
-tool workspace entirely and out of its sidebar.
+and MDCG 2019-16 evidence specifically.
+
+**The bolus calculator is not a feature of APProved.** It is a feature of the *client's
+device*, and like any device function it arrives as source documentation to be written up.
+The demo seeds two files for it — `bolus_calculator_spec.csv` (the algorithm, its
+configurable ranges and its risk controls, each with a requirement ID) and
+`bolus_calculator_verification.csv` (the IEC 62304 §5.5–5.7 test records). The generated
+sections quote those files: the algorithm table, the risk-control list, the test pass rate
+and the requirement coverage all come from the upload, not from anything hard-coded here.
+
+That is the general pattern. A different client with a different digital function uploads
+their own specification and verification records, and the same sections write themselves up
+from those instead.
 
 Sample files live in `sample_data/`. Reset the demo from the button at the foot of the
 dashboard — it rebuilds the engagement and discards generated work, without touching the

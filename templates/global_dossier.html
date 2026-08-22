@@ -49,6 +49,15 @@
                     <li>• {{ stats.safety.total or 0 }} adverse events
                         ({{ stats.safety.serious or 0 }} serious, {{ stats.safety.resolution_pct or 0 }}% resolved)</li>
                     <li>• {{ stats.efficacy.count or 0 }} statistical endpoints with 95% confidence intervals</li>
+                    {% if stats.software.count %}
+                        <li>• {{ stats.software.count }} device software parameters
+                            ({{ stats.software.safety_class }}, {{ stats.software.classification_rule }})</li>
+                    {% endif %}
+                    {% if stats.verification.total %}
+                        <li>• {{ stats.verification.passed }}/{{ stats.verification.total }} software
+                            verification tests passed across
+                            {{ stats.verification.requirements_covered }} requirements</li>
+                    {% endif %}
                 </ul>
             </div>
         </div>

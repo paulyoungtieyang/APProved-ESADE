@@ -141,7 +141,7 @@ matters is a `<symbol>` sprite in `base.html` plus `<use>` references.
 | `ResourcesPage` | `resources` | Rewritten for MDR guidance and device standards. |
 | `SubmissionPage` | `submission` | Same five steps; state persists server-side in the session and writes to the brief on submit. |
 | `SettingsPage` | `settings` | Same RBAC matrix, plus a provider/key status panel. Permissions are enforced server-side. |
-| — | `bolus_calculator` | **New.** The demo device's dosing-support module. |
+| — | `landing` / `enter_tool` | **New.** A fork before any engagement exists: the blank tool, or the pre-loaded CGM demo. The only pages without the sidebar shell. |
 | — | `audit_trail` | **New.** The append-only log the compliance story depends on. |
 
 ---
@@ -162,7 +162,9 @@ continues to the next section.
 ## 7. Extending it
 
 **A new page:** add a route in `app.py`, a template extending `base.html`, and one entry in
-`NAV_ITEMS`.
+`NAV_ITEMS`. Only add pages that are *APProved* functionality — a client device's own
+features are source material to be documented, not screens in this app. The bolus calculator
+was briefly built as a page and removed for exactly that reason.
 
 **A new dossier section:** add a dict to `content.DOSSIER_SECTIONS` and a builder to
 `content.draft_section`. It appears in the UI, the generation walk and the library with no

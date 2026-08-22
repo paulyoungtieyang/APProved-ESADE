@@ -1,0 +1,23 @@
+Parameter,Value,Unit,Category,Requirement_ID,Source
+Insulin_To_Carb_Ratio_Range,5-25,g per unit,Configuration,SW-REQ-011,User-configurable by prescriber
+Correction_Factor_Range,20-120,mg/dL per unit,Configuration,SW-REQ-012,User-configurable by prescriber
+Target_Glucose_Range,90-140,mg/dL,Configuration,SW-REQ-013,User-configurable by prescriber
+Carbohydrate_Entry_Range,0-250,g,Input,SW-REQ-021,Bounded input field
+Carb_Dose_Formula,carbohydrates / insulin_to_carb_ratio,units,Algorithm,SW-REQ-031,Design specification
+Correction_Dose_Formula,(glucose - target) / correction_factor,units,Algorithm,SW-REQ-032,Design specification
+Trend_Adjustment_Rising_Fast,+1.5,units,Algorithm,SW-REQ-033,Design specification
+Trend_Adjustment_Rising,+0.75,units,Algorithm,SW-REQ-033,Design specification
+Trend_Adjustment_Steady,0.0,units,Algorithm,SW-REQ-033,Design specification
+Trend_Adjustment_Falling,-0.75,units,Algorithm,SW-REQ-033,Design specification
+Trend_Adjustment_Falling_Fast,-1.5,units,Algorithm,SW-REQ-033,Design specification
+Insulin_On_Board_Subtraction,Mandatory,boolean,Risk_Control,SW-REQ-041,ISO 14971 risk control
+Output_Clamped_At_Zero,Mandatory,boolean,Risk_Control,SW-REQ-042,ISO 14971 risk control
+Hypoglycaemia_Warning_Threshold,70,mg/dL,Risk_Control,SW-REQ-043,ISO 14971 risk control
+Ketone_Check_Warning_Threshold,250,mg/dL,Risk_Control,SW-REQ-044,ISO 14971 risk control
+Falling_Trend_Low_Glucose_Block,100,mg/dL,Risk_Control,SW-REQ-045,ISO 14971 risk control
+Dose_Breakdown_Displayed,Mandatory,boolean,Risk_Control,SW-REQ-046,IEC 62366-1 usability control
+Explicit_Confirmation_Step,Mandatory,boolean,Risk_Control,SW-REQ-047,IEC 62366-1 usability control
+Trend_Suppressed_On_Unreliable_Reading,Mandatory,boolean,Risk_Control,SW-REQ-048,ISO 14971 risk control
+Software_Safety_Classification,Class C,IEC 62304,Classification,SW-REQ-001,IEC 62304 clause 4.3
+Device_Classification_Rule,Rule 11,MDR Annex VIII,Classification,SW-REQ-002,MDR 2017/745
+Insulin_Delivery_Capability,None,boolean,Classification,SW-REQ-003,Decision support only

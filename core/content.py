@@ -507,83 +507,10 @@ ROLE_LABELS = {role["id"]: role["name"] for role in DEFAULT_ROLES}
 
 ONBOARDING_STEPS = [
     {"id": "classification", "title": "Identify device classification", "endpoint": "regulations"},
-    {"id": "upload", "title": "Upload pivotal clinical data", "endpoint": "upload"},
+    {"id": "upload", "title": "Upload clinical data and device documentation", "endpoint": "upload"},
     {"id": "regulations", "title": "Select regulatory frameworks", "endpoint": "regulations"},
     {"id": "dossier", "title": "Generate the Global Value Dossier", "endpoint": "global_dossier"},
     {"id": "msl", "title": "Generate MSL field materials", "endpoint": "msl_material"},
-]
-
-
-# ==========================================================================
-# Bolus calculator
-# ==========================================================================
-
-def calculate_bolus(
-    carbs_g: float,
-    current_glucose: float,
-    target_glucose: float = 110.0,
-    icr: float = 12.0,
-    isf: float = 45.0,
-    insulin_on_board: float = 0.0,
-    trend: str = "steady",
-) -> dict[str, Any]:
-    """
-    Standard bolus calculation used by the demo device's dosing-support module.
-
-        bolus = carb dose + correction dose - insulin on board
-        carb dose       = carbohydrates / insulin-to-carb ratio
-        correction dose = (current glucose - target) / insulin sensitivity factor
-
-    A CGM trend adjustment is applied on top, which is what distinguishes a
-    sensor-integrated calculator from a fingerstick one.
-
-    Returned values are illustrative only — this is a prototype, not a dosing device.
-    """
-    icr = max(icr, 0.1)
-    isf = max(isf, 0.1)
-
-    carb_dose = carbs_g / icr
-    correction_dose = (current_glucose - target_glucose) / isf
-
-    trend_adjustments = {
-        "rising-fast": 1.5, "rising": 0.75, "steady": 0.0,
-        "falling": -0.75, "falling-fast": -1.5,
-    }
-    trend_adjustment = trend_adjustments.get(trend, 0.0)
-
-    total = carb_dose + correction_dose + trend_adjustment - insulin_on_board
-    total = max(total, 0.0)
-
-    warnings = []
-    if current_glucose < 70:
-        warnings.append("Glucose below 70 mg/dL — treat hypoglycaemia before dosing.")
-    if current_glucose > 250:
-        warnings.append("Glucose above 250 mg/dL — check ketones per clinical protocol.")
-    if trend in ("falling", "falling-fast") and current_glucose < 100:
-        warnings.append("Falling trend at a low glucose level — recheck before dosing.")
-    if insulin_on_board > 0 and correction_dose > 0:
-        warnings.append(f"{insulin_on_board:.1f} U insulin on board was subtracted from the total.")
-
-    return {
-        "carb_dose": round(carb_dose, 2),
-        "correction_dose": round(correction_dose, 2),
-        "trend_adjustment": round(trend_adjustment, 2),
-        "insulin_on_board": round(insulin_on_board, 2),
-        "total": round(total, 1),
-        "warnings": warnings,
-        "inputs": {
-            "carbs_g": carbs_g, "current_glucose": current_glucose,
-            "target_glucose": target_glucose, "icr": icr, "isf": isf, "trend": trend,
-        },
-    }
-
-
-GLUCOSE_TRENDS = [
-    ("rising-fast", "Rising fast  ↑↑"),
-    ("rising", "Rising  ↑"),
-    ("steady", "Steady  →"),
-    ("falling", "Falling  ↓"),
-    ("falling-fast", "Falling fast  ↓↓"),
 ]
 
 
@@ -680,6 +607,27 @@ def _dataset_digest(stats: dict) -> str:
             f"- {metric.replace('_', ' ')}: {values['value']}{values['unit']} "
             f"[95% CI {values['ci_low']}–{values['ci_high']}], p={values['p_value']}."
         )
+
+    software = stats.get("software") or {}
+    verification = stats.get("verification") or {}
+    if software:
+        parts.append(
+            f"- Digital function specification: {software.get('count')} documented parameters; "
+            f"software safety classification {software.get('safety_class')}; "
+            f"classified under {software.get('classification_rule')}; "
+            f"{len(software.get('risk_controls') or [])} specified risk controls."
+        )
+        for item in software.get("algorithm") or []:
+            parts.append(f"  - {item['parameter'].replace('_', ' ')}: {item['value']} "
+                         f"({item['requirement_id']})")
+    if verification:
+        parts.append(
+            f"- Software verification: {verification.get('passed')}/{verification.get('total')} "
+            f"test cases passed ({verification.get('pass_pct')}%), covering "
+            f"{verification.get('requirements_covered')} requirements. "
+            f"{verification.get('failed')} failures."
+        )
+
     return "\n".join(parts) if parts else "- No dataset uploaded yet."
 
 
@@ -688,6 +636,8 @@ def draft_section(section_id: str, brief: dict, stats: dict, overlay: str = "") 
     study = stats.get("study") or {}
     safety = stats.get("safety") or {}
     endpoints = (stats.get("efficacy") or {}).get("endpoints") or {}
+    software = stats.get("software") or {}
+    verification = stats.get("verification") or {}
 
     markets = ", ".join(brief.get("target_markets") or ["Spain"])
     primary_market = (brief.get("target_markets") or ["Spain"])[0]
@@ -696,6 +646,35 @@ def draft_section(section_id: str, brief: dict, stats: dict, overlay: str = "") 
     mard = _fmt(study.get("mean_mard"))
     patients = _fmt(study.get("patients"))
     wear = _fmt(study.get("mean_wear_days"))
+
+    # Figures from the client's uploaded software documentation, so the digital
+    # function's claims are as traceable as the clinical ones.
+    sw_class = _fmt(software.get("safety_class"), "not stated in the uploaded specification")
+    sw_rule = _fmt(software.get("classification_rule"), "not stated in the uploaded specification")
+    ver_total = _fmt(verification.get("total"), "no")
+    ver_passed = _fmt(verification.get("passed"), "no")
+    ver_pct = _fmt(verification.get("pass_pct"), "—")
+    ver_reqs = _fmt(verification.get("requirements_covered"), "no")
+
+    def controls(limit: int = 6) -> str:
+        items = (software.get("risk_controls") or [])[:limit]
+        if not items:
+            return "- No risk controls listed in the uploaded specification."
+        return "\n".join(
+            f"- {item['parameter'].replace('_', ' ')}: **{item['value']}"
+            f"{(' ' + item['unit']) if item['unit'] not in ('', 'boolean') else ''}** "
+            f"({item['requirement_id']})"
+            for item in items
+        )
+
+    def algorithm() -> str:
+        items = software.get("algorithm") or []
+        if not items:
+            return "- Algorithm not described in the uploaded specification."
+        return "\n".join(
+            f"- {item['parameter'].replace('_', ' ')}: `{item['value']}` ({item['requirement_id']})"
+            for item in items
+        )
 
     def endpoint(name: str) -> str:
         item = endpoints.get(name)
@@ -820,9 +799,10 @@ glucose readings were compared against a laboratory reference method (YSI) acros
 The calculator is not evaluated by MARD. Its performance evidence is verification and
 human-factors data rather than a clinical accuracy endpoint:
 
-- **Algorithm verification.** Computed doses were checked against independently derived
-  reference calculations across the specified input ranges, including boundary conditions
-  for carbohydrate entry, correction dose and insulin on board.
+- **Algorithm verification.** {ver_passed} of {ver_total} test cases passed ({ver_pct}%),
+  covering {ver_reqs} software requirements. Computed doses were checked against
+  independently derived reference calculations across the specified input ranges, including
+  boundary conditions for carbohydrate entry, correction dose and insulin on board.
 - **Trend-adjustment behaviour.** Adjustment is applied only when the sensor reading meets
   the reliability criteria used for display, so the calculator inherits the accuracy
   characterised above rather than asserting an independent one.
@@ -954,17 +934,32 @@ dossier, per MDCG 2020-5 expectations on equivalence and comparative claims.""",
 This section applies to the **digital function** — the bolus calculator — which is a
 medical device in its own right under MDR Annex VIII Rule 11 and MDCG 2019-11.
 
-**Software safety classification.** Class C under IEC 62304: a failure of the dose
-recommendation could contribute to serious injury through hypoglycaemia or persistent
-hyperglycaemia.
+**Software safety classification.** {sw_class} under IEC 62304, per the uploaded software
+specification: a failure of the dose recommendation could contribute to serious injury
+through hypoglycaemia or persistent hyperglycaemia. Classified under {sw_rule}.
+
+**Specified algorithm**
+
+{algorithm()}
+
+**Specified risk controls**
+
+{controls()}
+
+**Verification evidence (IEC 62304 §5.5–5.7)**
+
+The uploaded verification record contains **{ver_total} test cases**, of which
+**{ver_passed} passed ({ver_pct}%)**, covering **{ver_reqs} distinct software requirements**.
+Coverage includes the carbohydrate and correction dose calculations, every trend-adjustment
+state, insulin-on-board subtraction, output clamping, the configurable parameter boundaries
+and each warning threshold.
 
 **Lifecycle records (IEC 62304)**
 
 - §5.1 Software development plan, including the SOUP inventory.
 - §5.2–5.4 Requirements, architectural design and detailed design, traced to the intended
-  purpose and to the risk controls in the ISO 14971 file.
-- §5.5–5.7 Unit, integration and system test records covering the dose calculation across
-  its specified input ranges and boundary conditions.
+  purpose and to the risk controls listed above.
+- §5.5–5.7 Unit, integration and system test records — summarised above.
 - §6 Maintenance process, with a defined route for post-release changes.
 - §7 Risk management for software, cross-referenced to the use-related risk analysis.
 - §8 Configuration management and §9 problem resolution.
@@ -1055,6 +1050,8 @@ def draft_msl_material(material_id: str, brief: dict, stats: dict, config: dict)
     study = stats.get("study") or {}
     endpoints = (stats.get("efficacy") or {}).get("endpoints") or {}
     safety = stats.get("safety") or {}
+    software = stats.get("software") or {}
+    verification = stats.get("verification") or {}
 
     material = MSL_MATERIAL_BY_ID.get(material_id, {"name": material_id})
     audience = dict(AUDIENCES).get(config.get("audience"), "healthcare professionals")
@@ -1119,9 +1116,10 @@ def draft_msl_material(material_id: str, brief: dict, stats: dict, config: dict)
 - Decision support only — the device does not deliver insulin
 
 ## Digital function — evidence and controls
-- Algorithm verified against reference calculations across the input range
+- {_fmt(verification.get('passed'), 'No')} of {_fmt(verification.get('total'), 'no')} verification test cases passed ({_fmt(verification.get('pass_pct'), '—')}%)
+- {_fmt(verification.get('requirements_covered'), 'No')} software requirements covered
 - Human-factors validation per IEC 62366-1, no unresolved critical use errors
-- Developed under IEC 62304 as Class C software
+- {_fmt(software.get('safety_class'), 'Classification not stated')} under IEC 62304
 - Cybersecurity assessed per MDCG 2019-16
 
 ## Patient experience
@@ -1176,8 +1174,16 @@ A: {endpoint('Sensor_Longevity')}, consistent with the labelled wear duration.
 
 **Q: How does the bolus calculator work?**
 A: It combines the carbohydrate dose (carbohydrates ÷ insulin-to-carb ratio) with a
-correction dose ((current glucose − target) ÷ insulin sensitivity factor), applies a CGM
-trend adjustment, then subtracts insulin on board.
+correction dose ((current glucose − target) ÷ correction factor), applies a CGM trend
+adjustment, then subtracts insulin on board. It is decision support only and issues no
+insulin delivery command.
+
+**Q: How was the calculator verified?**
+A: {_fmt(verification.get('passed'), 'No')} of {_fmt(verification.get('total'), 'no')} test
+cases passed ({_fmt(verification.get('pass_pct'), '—')}%), covering
+{_fmt(verification.get('requirements_covered'), 'no')} software requirements including every
+trend state, the parameter boundaries and each warning threshold. It is developed under
+IEC 62304 as {_fmt(software.get('safety_class'), 'a classified')} software.
 
 **Q: What adverse events were observed?**
 A: {_fmt(safety.get('total'))} events, {_fmt(safety.get('serious'))} serious,

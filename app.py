@@ -61,10 +61,15 @@ app.config["MAX_CONTENT_LENGTH"] = 100 * 1024 * 1024  # 100 MB per the upload pa
 
 DEMO_CLIENT_NAME = "ContinuousGlucose Monitoring Ltd."
 
+# Source material the client hands over. The two bolus-calculator files are the
+# device's own software documentation — the digital function is something the
+# client documents and APProved writes up, never a feature of this platform.
 SAMPLE_FILES = [
     ("cgm_pivotal_study.csv", "clinical"),
     ("safety_adverse_events.csv", "safety"),
     ("efficacy_analysis.csv", "efficacy"),
+    ("bolus_calculator_spec.csv", "software"),
+    ("bolus_calculator_verification.csv", "verification"),
 ]
 
 # The demo ships a stand-in corporate deck template so the "generate a branded
@@ -76,18 +81,15 @@ SAMPLE_BRAND_TEMPLATE = os.path.join("brand", "acme_medical_corporate_template.p
 # require_workspace() below.
 PUBLIC_ENDPOINTS = {"landing", "enter_tool", "enter_demo", "static"}
 
-# `demo_only` items are the CGM device's own illustrative features rather than
-# general tool functionality — the bolus calculator is not something generated
-# by AI, it's the digital function of the demo device itself. It has no place
-# in a blank real engagement for an unrelated product, so it's filtered out of
-# the sidebar outside demo mode (see inject_globals below).
+# Every item here is APProved functionality. Client device features — the demo
+# device's bolus calculator, for instance — are never pages in this app; they are
+# things the client documents, and they arrive as uploaded source material.
 NAV_ITEMS = [
     {"section": "Workspace"},
     {"name": "Dashboard", "endpoint": "dashboard", "icon": "file-text"},
     {"name": "Upload Clinical Data", "endpoint": "upload", "icon": "upload"},
     {"name": "Regulations", "endpoint": "regulations", "icon": "scale"},
     {"name": "Policy News", "endpoint": "policy_news", "icon": "newspaper"},
-    {"name": "Bolus Calculator", "endpoint": "bolus_calculator", "icon": "calculator", "demo_only": True},
     {"section": "Generate"},
     {"name": "Global Value Dossier", "endpoint": "global_dossier", "icon": "file-stack"},
     {"name": "MSL Materials", "endpoint": "msl_material", "icon": "message-square"},
@@ -99,12 +101,6 @@ NAV_ITEMS = [
     {"name": "Audit Trail", "endpoint": "audit_trail", "icon": "history"},
     {"name": "Settings", "endpoint": "settings", "icon": "settings"},
 ]
-
-
-def visible_nav_items() -> list[dict]:
-    """Nav list scoped to the active workspace — demo-only items drop out of the tool."""
-    mode = session.get("workspace_mode")
-    return [item for item in NAV_ITEMS if not item.get("demo_only") or mode == "demo"]
 
 
 # --------------------------------------------------------------------------
@@ -282,7 +278,8 @@ def engagement_context(db) -> tuple[int, dict, dict]:
 def dataset_stats(db, engagement_id: int) -> dict:
     """Read every uploaded tabular file and derive the figures the drafts cite."""
     files = db.query(UploadedFile).filter_by(engagement_id=engagement_id).all()
-    stats: dict = {"study": {}, "safety": {}, "efficacy": {}, "files": []}
+    stats: dict = {"study": {}, "safety": {}, "efficacy": {},
+                   "software": {}, "verification": {}, "files": []}
 
     for record in files:
         path = os.path.join(UPLOAD_DIR, record.file_path)
@@ -315,7 +312,13 @@ def dataset_stats(db, engagement_id: int) -> dict:
             entry["error"] = table["error"]
 
             columns = set(table["columns"])
-            if {"MARD", "Patient_ID"} & columns and "Event_Type" not in columns:
+            # Order matters: the software files also carry a Parameter/Metric-ish
+            # shape, so match their distinctive columns before the clinical ones.
+            if "Test_ID" in columns:
+                stats["verification"] = dataset.summarise_verification(table["rows"])
+            elif "Requirement_ID" in columns or "Parameter" in columns:
+                stats["software"] = dataset.summarise_software_spec(table["rows"])
+            elif {"MARD", "Patient_ID"} & columns and "Event_Type" not in columns:
                 stats["study"] = dataset.summarise_study(table["rows"])
             elif "Event_Type" in columns:
                 stats["safety"] = dataset.summarise_safety(table["rows"])
@@ -371,61 +374,95 @@ def file_size_label(num_bytes: int) -> str:
 
 
 def markdown_to_html(text: str) -> str:
-    """Minimal Markdown renderer — enough for the drafts this app produces."""
+    """
+    Minimal Markdown renderer — enough for the drafts this app produces.
+
+    Source text is hard-wrapped, so a bullet or paragraph often spans several
+    lines. Continuation lines are folded into the block they belong to; rendering
+    each source line independently would scatter stray <p> fragments between the
+    list items.
+    """
     from markupsafe import escape
 
-    html_lines: list[str] = []
+    html: list[str] = []
     in_list = False
+    buffer: list[str] = []
+    kind: str | None = None          # "p" | "li" | "quote"
+
+    def inline(raw: str) -> str:
+        safe = str(escape(raw))
+        while safe.count("**") >= 2:
+            safe = safe.replace("**", "<strong>", 1).replace("**", "</strong>", 1)
+        while safe.count("`") >= 2:
+            safe = safe.replace("`", "<code>", 1).replace("`", "</code>", 1)
+        return safe
+
+    def flush():
+        nonlocal buffer, kind
+        if not buffer:
+            return
+        body = inline(" ".join(buffer))
+        if kind == "li":
+            html.append(f"<li>{body}</li>")
+        elif kind == "quote":
+            html.append(f'<p class="text-muted"><em>{body}</em></p>')
+        else:
+            html.append(f"<p>{body}</p>")
+        buffer, kind = [], None
 
     def close_list():
         nonlocal in_list
+        flush()
         if in_list:
-            html_lines.append("</ul>")
+            html.append("</ul>")
             in_list = False
 
     for raw in (text or "").split("\n"):
-        line = raw.rstrip()
-        stripped = line.strip()
+        stripped = raw.strip()
 
         if not stripped:
             close_list()
             continue
+
         if stripped.startswith("---"):
             close_list()
-            html_lines.append("<hr>")
+            html.append("<hr>")
             continue
-
-        safe = str(escape(stripped))
-        # inline emphasis + code
-        while "**" in safe:
-            safe = safe.replace("**", "<strong>", 1).replace("**", "</strong>", 1)
-        while safe.count("`") >= 2:
-            safe = safe.replace("`", "<code>", 1).replace("`", "</code>", 1)
 
         if stripped.startswith("#"):
             close_list()
             level = min(len(stripped) - len(stripped.lstrip("#")), 4)
-            html_lines.append(f"<h{level}>{safe.lstrip('#').strip()}</h{level}>")
-        elif stripped.startswith(("- ", "* ")):
+            html.append(f"<h{level}>{inline(stripped.lstrip('#').strip())}</h{level}>")
+            continue
+
+        if stripped.startswith(("- ", "* ", "• ")):
+            flush()
             if not in_list:
-                html_lines.append("<ul>")
+                html.append("<ul>")
                 in_list = True
-            html_lines.append(f"<li>{safe[2:]}</li>")
-        elif stripped.startswith("> "):
+            buffer, kind = [stripped[2:].strip()], "li"
+            continue
+
+        if stripped.startswith("> "):
             close_list()
-            html_lines.append(f'<p class="text-muted"><em>{safe[2:]}</em></p>')
+            buffer, kind = [stripped[2:].strip()], "quote"
+            continue
+
+        # A continuation of whatever block is open, or the start of a paragraph.
+        if kind:
+            buffer.append(stripped)
         else:
             close_list()
-            html_lines.append(f"<p>{safe}</p>")
+            buffer, kind = [stripped], "p"
 
     close_list()
-    return "\n".join(html_lines)
+    return "\n".join(html)
 
 
 @app.context_processor
 def inject_globals():
     return {
-        "nav_items": visible_nav_items(),
+        "nav_items": NAV_ITEMS,
         "current_role": current_role(),
         "current_role_label": content.ROLE_LABELS.get(current_role(), "Administrator"),
         "can": can,
@@ -1101,49 +1138,6 @@ def msl_material():
         )
     finally:
         db.close()
-
-
-# --------------------------------------------------------------------------
-# Bolus calculator
-# --------------------------------------------------------------------------
-
-
-@app.route("/bolus-calculator", methods=["GET", "POST"])
-def bolus_calculator():
-    # The demo device's own digital function, not a general tool feature —
-    # keep it out of the blank/real workspace entirely, not just off its nav.
-    if session.get("workspace_mode") != "demo":
-        flash("The bolus calculator is part of the CGM demo device.", "error")
-        return redirect(url_for("dashboard"))
-
-    result = None
-    defaults = {"carbs_g": 60, "current_glucose": 180, "target_glucose": 110,
-                "icr": 12, "isf": 45, "insulin_on_board": 0, "trend": "steady"}
-
-    if request.method == "POST":
-        def number(field, fallback):
-            try:
-                return float(request.form.get(field, fallback))
-            except (TypeError, ValueError):
-                return float(fallback)
-
-        defaults = {
-            "carbs_g": number("carbs_g", 60),
-            "current_glucose": number("current_glucose", 180),
-            "target_glucose": number("target_glucose", 110),
-            "icr": number("icr", 12),
-            "isf": number("isf", 45),
-            "insulin_on_board": number("insulin_on_board", 0),
-            "trend": request.form.get("trend", "steady"),
-        }
-        result = content.calculate_bolus(**defaults)
-
-    return render_template(
-        "bolus_calculator.html",
-        result=result,
-        values=defaults,
-        trends=content.GLUCOSE_TRENDS,
-    )
 
 
 # --------------------------------------------------------------------------

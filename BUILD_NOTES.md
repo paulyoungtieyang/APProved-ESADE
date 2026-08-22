@@ -104,12 +104,14 @@ between the demo and a production system is explicit rather than implied.
 
 ## Not a medical device
 
-The bolus calculator demonstrates a documented algorithm — it is the demo device's digital
-function, not a document the tool generates. It is not validated, not certified, and must
-not inform real dosing. It is also not reachable from the real tool workspace: the route
-redirects to the dashboard outside demo mode, and the sidebar link is hidden outside it too.
+APProved is a writing platform. It contains no dosing logic and no device functionality of
+any kind — the bolus calculator belongs to the *client's device*, and exists here only as
+uploaded documentation to be written up (`sample_data/bolus_calculator_spec.csv` and
+`bolus_calculator_verification.csv`). There is no calculator page, no route and no
+calculation code in this repository.
+
 The generated dossier text is a drafting aid requiring expert review before any regulatory
-use.
+use, and the figures in it are illustrative.
 
 ---
 

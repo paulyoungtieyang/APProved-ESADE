@@ -1,0 +1,23 @@
+Test_ID,Requirement_ID,Test_Description,Carbs_g,Glucose_mgdL,Target_mgdL,ICR,CF,IOB_units,Trend,Expected_Dose,Observed_Dose,Result
+SW-VER-001,SW-REQ-031,Carbohydrate dose only at target glucose,60,110,110,12,45,0.0,steady,5.0,5.0,Pass
+SW-VER-002,SW-REQ-032,Correction dose only with zero carbohydrates,0,200,110,12,45,0.0,steady,2.0,2.0,Pass
+SW-VER-003,SW-REQ-031,Combined carbohydrate and correction dose,75,210,110,10,40,0.0,steady,10.0,10.0,Pass
+SW-VER-004,SW-REQ-041,Insulin on board subtracted from total,75,210,110,10,40,1.5,steady,8.5,8.5,Pass
+SW-VER-005,SW-REQ-033,Rising trend adjustment applied,60,180,110,12,45,0.0,rising,7.3,7.3,Pass
+SW-VER-006,SW-REQ-033,Rising fast trend adjustment applied,60,180,110,12,45,0.0,rising-fast,8.1,8.1,Pass
+SW-VER-007,SW-REQ-033,Falling trend adjustment applied,60,180,110,12,45,0.0,falling,5.8,5.8,Pass
+SW-VER-008,SW-REQ-033,Falling fast trend adjustment applied,60,180,110,12,45,0.0,falling-fast,5.1,5.1,Pass
+SW-VER-009,SW-REQ-042,Negative result clamped to zero,0,70,110,12,45,2.0,falling,0.0,0.0,Pass
+SW-VER-010,SW-REQ-043,Hypoglycaemia warning raised below threshold,30,65,110,12,45,0.0,steady,Warning,Warning,Pass
+SW-VER-011,SW-REQ-044,Ketone check warning raised above threshold,60,280,110,12,45,0.0,steady,Warning,Warning,Pass
+SW-VER-012,SW-REQ-045,Falling trend at low glucose blocks correction,45,95,110,12,45,0.0,falling,Warning,Warning,Pass
+SW-VER-013,SW-REQ-021,Upper carbohydrate boundary accepted,250,110,110,12,45,0.0,steady,20.8,20.8,Pass
+SW-VER-014,SW-REQ-021,Carbohydrate entry above range rejected,300,110,110,12,45,0.0,steady,Rejected,Rejected,Pass
+SW-VER-015,SW-REQ-011,Insulin-to-carb ratio lower boundary,60,110,110,5,45,0.0,steady,12.0,12.0,Pass
+SW-VER-016,SW-REQ-011,Insulin-to-carb ratio upper boundary,60,110,110,25,45,0.0,steady,2.4,2.4,Pass
+SW-VER-017,SW-REQ-012,Correction factor lower boundary,0,200,110,12,20,0.0,steady,4.5,4.5,Pass
+SW-VER-018,SW-REQ-012,Correction factor upper boundary,0,200,110,12,120,0.0,steady,0.8,0.8,Pass
+SW-VER-019,SW-REQ-048,Trend adjustment suppressed on unreliable sensor reading,60,180,110,12,45,0.0,rising,6.6,6.6,Pass
+SW-VER-020,SW-REQ-046,Dose breakdown displayed before confirmation,60,180,110,12,45,0.0,steady,Displayed,Displayed,Pass
+SW-VER-021,SW-REQ-047,Confirmation required before dose accepted,60,180,110,12,45,0.0,steady,Required,Required,Pass
+SW-VER-022,SW-REQ-003,No insulin delivery command issued,60,180,110,12,45,0.0,steady,None,None,Pass

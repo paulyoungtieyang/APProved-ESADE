@@ -198,6 +198,77 @@ def summarise_efficacy(rows: list[dict]) -> dict[str, Any]:
     return {"endpoints": endpoints, "count": len(endpoints)}
 
 
+def summarise_software_spec(rows: list[dict]) -> dict[str, Any]:
+    """
+    Software specification for a device's digital function.
+
+    Groups the parameter table by category so the drafts can quote the algorithm,
+    its configurable ranges and its risk controls without hard-coding any of them.
+    """
+    by_category: dict[str, list[dict]] = {}
+    parameters: dict[str, str] = {}
+
+    for row in rows:
+        name = str(row.get("Parameter", "")).strip()
+        if not name:
+            continue
+        value = str(row.get("Value", "")).strip()
+        parameters[name] = value
+        by_category.setdefault(str(row.get("Category", "Other")).strip(), []).append({
+            "parameter": name,
+            "value": value,
+            "unit": str(row.get("Unit", "")).strip(),
+            "requirement_id": str(row.get("Requirement_ID", "")).strip(),
+            "source": str(row.get("Source", "")).strip(),
+        })
+
+    return {
+        "parameters": parameters,
+        "by_category": by_category,
+        "risk_controls": by_category.get("Risk_Control", []),
+        "algorithm": by_category.get("Algorithm", []),
+        "configuration": by_category.get("Configuration", []),
+        "safety_class": parameters.get("Software_Safety_Classification", ""),
+        "classification_rule": parameters.get("Device_Classification_Rule", ""),
+        "count": len(parameters),
+    }
+
+
+def summarise_verification(rows: list[dict]) -> dict[str, Any]:
+    """Verification test records — the IEC 62304 §5.5–5.7 evidence for software."""
+    total = passed = failed = 0
+    requirements: set[str] = set()
+    failures: list[dict] = []
+
+    for row in rows:
+        result = str(row.get("Result", "")).strip().lower()
+        if not result:
+            continue
+        total += 1
+        requirement = str(row.get("Requirement_ID", "")).strip()
+        if requirement:
+            requirements.add(requirement)
+        if result == "pass":
+            passed += 1
+        else:
+            failed += 1
+            failures.append({
+                "test_id": str(row.get("Test_ID", "")).strip(),
+                "description": str(row.get("Test_Description", "")).strip(),
+                "expected": str(row.get("Expected_Dose", "")).strip(),
+                "observed": str(row.get("Observed_Dose", "")).strip(),
+            })
+
+    return {
+        "total": total,
+        "passed": passed,
+        "failed": failed,
+        "pass_pct": round(100 * passed / total, 1) if total else 0,
+        "requirements_covered": len(requirements),
+        "failures": failures,
+    }
+
+
 def classify(filename: str, columns: list[str]) -> str:
     """Guess a data category from the filename and header row."""
     haystack = (filename + " " + " ".join(columns)).lower()
@@ -206,6 +277,11 @@ def classify(filename: str, columns: list[str]) -> str:
         return "brand"
     if any(token in haystack for token in ("brand", "template", "corporate", "style guide")):
         return "brand"
+    # Device software documentation — specification and verification records.
+    if any(token in haystack for token in ("test_id", "verification", "expected_dose")):
+        return "verification"
+    if any(token in haystack for token in ("requirement_id", "calculator", "software", "parameter")):
+        return "software"
     if any(token in haystack for token in ("adverse", "safety", "event_type", "severity")):
         return "safety"
     if any(token in haystack for token in ("efficacy", "endpoint", "p_value", "metric")):

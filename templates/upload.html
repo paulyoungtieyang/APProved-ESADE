@@ -51,6 +51,8 @@
                             <option value="efficacy">Efficacy endpoints</option>
                             <option value="demographics">Demographics &amp; baseline</option>
                             <option value="economics">Health economics / tender</option>
+                            <option value="software">Device software specification</option>
+                            <option value="verification">Software verification records</option>
                             <option value="brand">Brand template / guidelines</option>
                         </select>
                     </div>
@@ -69,6 +71,8 @@
                     <li>• Patient demographics and baseline characteristics</li>
                     <li>• Efficacy endpoint tables with confidence intervals</li>
                     <li>• Health-economic and regional tender specifications</li>
+                    <li>• Device software specifications and verification records — for any
+                          digital function that needs documenting alongside the hardware</li>
                     <li>• Corporate PowerPoint templates (.pptx / .potx) used to brand slide decks</li>
                 </ul>
             </div>
@@ -132,7 +136,7 @@
     </div>
 
     {# ------------------------------------------------------ Parsed statistics #}
-    {% if stats.study.patients or stats.safety.total %}
+    {% if stats.study.patients or stats.safety.total or stats.software.count or stats.verification.total %}
         <div class="card mt-6">
             <div class="card__header">
                 <h2 class="card__title">Parsed Dataset Summary</h2>
@@ -162,6 +166,31 @@
                                 {% for name, count in stats.safety.by_type.items() %}
                                     <li>{{ name }}: {{ count }}</li>
                                 {% endfor %}
+                            </ul>
+                        </div>
+                    {% endif %}
+
+                    {% if stats.software.count %}
+                        <div class="muted-panel">
+                            <h3>Device software specification</h3>
+                            <ul class="text-sm text-muted" style="list-style:none">
+                                <li>Documented parameters: <strong class="text-strong">{{ stats.software.count }}</strong></li>
+                                <li>Safety class: <strong class="text-strong">{{ stats.software.safety_class }}</strong></li>
+                                <li>Classification: <strong class="text-strong">{{ stats.software.classification_rule }}</strong></li>
+                                <li>Specified risk controls: <strong class="text-strong">{{ stats.software.risk_controls | length }}</strong></li>
+                            </ul>
+                        </div>
+                    {% endif %}
+
+                    {% if stats.verification.total %}
+                        <div class="muted-panel">
+                            <h3>Software verification</h3>
+                            <ul class="text-sm text-muted" style="list-style:none">
+                                <li>Test cases: <strong class="text-strong">{{ stats.verification.total }}</strong></li>
+                                <li>Passed: <strong class="text-strong">{{ stats.verification.passed }}
+                                    ({{ stats.verification.pass_pct }}%)</strong></li>
+                                <li>Failed: <strong class="text-strong">{{ stats.verification.failed }}</strong></li>
+                                <li>Requirements covered: <strong class="text-strong">{{ stats.verification.requirements_covered }}</strong></li>
                             </ul>
                         </div>
                     {% endif %}
