@@ -1,0 +1,236 @@
+{% extends "base.html" %}
+
+{% block title %}Compose Prompt — User View{% endblock %}
+
+{% block content %}
+<div class="prompt-container">
+    <h2>Compose Generation Prompt</h2>
+
+    <div class="prompt-workspace">
+        <form method="POST" class="form" id="promptForm">
+            <fieldset>
+                <legend>Deliverable &amp; Provider</legend>
+
+                <div class="form-group">
+                    <label for="deliverable_type">Deliverable Type *</label>
+                    <select id="deliverable_type" name="deliverable_type" required onchange="updateModelOptions()">
+                        <option value="">-- Select --</option>
+                        {% for dtype in deliverable_types %}
+                        <option value="{{ dtype }}">{{ dtype.replace('_', ' ').title() }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label for="provider">LLM Provider *</label>
+                    <select id="provider" name="provider" required onchange="updateModelOptions()">
+                        <option value="anthropic">Anthropic</option>
+                        <option value="openai">OpenAI</option>
+                        <option value="google">Google (Gemini)</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label for="model">Model *</label>
+                    <select id="model" name="model" required>
+                        <option value="claude-opus-5">Claude Opus 5</option>
+                        <option value="claude-sonnet-5">Claude Sonnet 5</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label for="api_key">API Key (Optional)</label>
+                    <input type="password" id="api_key" name="api_key" placeholder="Leave blank to use default credentials">
+                    <small>Your API key is never stored. It's used only for this generation.</small>
+                </div>
+            </fieldset>
+
+            <fieldset>
+                <legend>Prompt Composition</legend>
+
+                <div class="layer-controls">
+                    <div class="layer client-layer">
+                        <h4>Layer 1: Client Baseline (Read-Only)</h4>
+                        <div class="client-fields">
+                            <div class="field-toggle">
+                                <label><input type="checkbox" name="use_tone" checked> Tone: <strong>{{ brief.tone }}</strong></label>
+                            </div>
+                            <div class="field-toggle">
+                                <label><input type="checkbox" name="use_markets" checked> Markets: <strong>{{ brief.target_markets|join(', ') }}</strong></label>
+                            </div>
+                            {% if brief.key_messages %}
+                            <div class="field-toggle">
+                                <label><input type="checkbox" name="use_key_messages" checked> Key Messages</label>
+                            </div>
+                            {% endif %}
+                        </div>
+                    </div>
+
+                    <div class="layer template-layer">
+                        <h4>Layer 2: Deliverable Template (Pre-filled)</h4>
+                        <p class="info">System role + section instructions are auto-generated based on deliverable type and client requirements.</p>
+                        <div class="template-preview">
+                            <p><em>Template will be generated based on selections above.</em></p>
+                        </div>
+                    </div>
+
+                    <div class="layer user-layer">
+                        <h4>Layer 3: Your Expert Additions</h4>
+                        <div class="form-group">
+                            <label for="user_overlay">Expert Overlay</label>
+                            <textarea id="user_overlay" name="user_overlay" rows="8" placeholder="Add emphasis, corrections, or specific guidance here. This layer is editable and will be combined with the client baseline and template."></textarea>
+                            <small>Use this to personalize the prompt based on your expertise and knowledge of the client's needs.</small>
+                        </div>
+                    </div>
+                </div>
+            </fieldset>
+
+            <fieldset>
+                <legend>Resolved Prompt Preview</legend>
+                <div class="prompt-preview">
+                    <p class="info">This is the exact text that will be sent to the LLM. Colors show which layer each part comes from.</p>
+                    <div id="resolvedPrompt" class="resolved-text">
+                        <p><em>Prompt will be previewed here when you fill in the form.</em></p>
+                    </div>
+                </div>
+            </fieldset>
+
+            <div class="action-bar">
+                <button type="submit" class="btn btn-primary">Generate</button>
+                <a href="{{ url_for('user_context', engagement_id=engagement.id) }}" class="btn btn-secondary">Back</a>
+            </div>
+        </form>
+    </div>
+</div>
+
+<style>
+.prompt-workspace {
+    max-width: 1200px;
+    margin: 0 auto;
+}
+
+fieldset {
+    border: 1px solid #ddd;
+    padding: 1em;
+    margin-bottom: 1.5em;
+    border-radius: 4px;
+}
+
+legend {
+    font-weight: bold;
+    padding: 0 0.5em;
+}
+
+.layer-controls {
+    display: flex;
+    flex-direction: column;
+    gap: 1.5em;
+}
+
+.layer {
+    padding: 1em;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    background-color: #fafafa;
+}
+
+.client-layer {
+    border-left: 4px solid #4CAF50;
+    background-color: #f0f8f0;
+}
+
+.template-layer {
+    border-left: 4px solid #2196F3;
+    background-color: #f0f5ff;
+}
+
+.user-layer {
+    border-left: 4px solid #FF9800;
+    background-color: #fff8f0;
+}
+
+.layer h4 {
+    margin-top: 0;
+    margin-bottom: 0.5em;
+}
+
+.field-toggle {
+    display: flex;
+    align-items: center;
+    gap: 0.5em;
+    margin-bottom: 0.5em;
+}
+
+.field-toggle label {
+    display: flex;
+    align-items: center;
+    gap: 0.5em;
+    cursor: pointer;
+}
+
+.template-preview,
+.prompt-preview {
+    background-color: #fff;
+    border: 1px solid #ccc;
+    padding: 1em;
+    border-radius: 4px;
+    max-height: 400px;
+    overflow-y: auto;
+    font-family: monospace;
+    font-size: 0.9em;
+    line-height: 1.4;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+}
+
+.info {
+    color: #666;
+    font-size: 0.9em;
+    margin-bottom: 0.5em;
+}
+
+.resolved-text {
+    background-color: #fff;
+    padding: 1em;
+    border-radius: 4px;
+    font-family: monospace;
+    font-size: 0.9em;
+    line-height: 1.5;
+}
+
+.resolved-text .client { color: #2d7d2d; background: #f0f8f0; padding: 0.2em 0.4em; }
+.resolved-text .template { color: #1565c0; background: #f0f5ff; padding: 0.2em 0.4em; }
+.resolved-text .user { color: #e65100; background: #fff8f0; padding: 0.2em 0.4em; }
+</style>
+
+<script>
+const models = {
+    anthropic: ["claude-opus-5", "claude-sonnet-5", "claude-haiku-4-5-20251001"],
+    openai: ["gpt-4o", "gpt-4-turbo", "gpt-3.5-turbo"],
+    google: ["gemini-pro", "gemini-1.5-pro"]
+};
+
+function updateModelOptions() {
+    const provider = document.getElementById("provider").value;
+    const modelSelect = document.getElementById("model");
+
+    modelSelect.innerHTML = "";
+    (models[provider] || []).forEach(model => {
+        const option = document.createElement("option");
+        option.value = model;
+        option.textContent = model;
+        modelSelect.appendChild(option);
+    });
+}
+
+document.getElementById("promptForm").addEventListener("submit", function(e) {
+    e.preventDefault();
+    // In the next phase, this will generate the prompt and send it to the backend
+    console.log("Prompt composed. Generation wired in next phase.");
+    alert("Prompt composed! Generation will be implemented in the next phase.");
+});
+
+// Initialize on page load
+updateModelOptions();
+</script>
+{% endblock %}

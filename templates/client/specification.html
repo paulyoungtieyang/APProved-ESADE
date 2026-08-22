@@ -1,0 +1,173 @@
+{% extends "base.html" %}
+
+{% block title %}Specify Requirements — Client View{% endblock %}
+
+{% block content %}
+<div class="specification-container">
+    <h2>Specify Deliverable Requirements</h2>
+
+    <div class="progress-indicator">
+        <span class="step">1. Upload</span> →
+        <span class="step active">2. Specify</span> →
+        <span class="step">3. Review</span>
+    </div>
+
+    {% if not has_uploads %}
+        <div class="alert alert-warning">
+            Please upload clinical data files before proceeding.
+            <a href="{{ url_for('client_upload', engagement_id=engagement.id) }}">Go back to upload</a>
+        </div>
+    {% else %}
+        <form method="POST" class="form specification-form">
+            <fieldset>
+                <legend>Deliverables</legend>
+
+                <div class="form-group checkbox-group">
+                    <label>What deliverables do you need?</label>
+                    <label><input type="checkbox" name="deliverable_types" value="gvd"> Global Value Dossier</label>
+                    <label><input type="checkbox" name="deliverable_types" value="slide_deck"> Scientific Slide Deck</label>
+                    <label><input type="checkbox" name="deliverable_types" value="summary"> Medical Summary Document</label>
+                    <label><input type="checkbox" name="deliverable_types" value="faq"> Scientific FAQ</label>
+                    <label><input type="checkbox" name="deliverable_types" value="email_templates"> Email Response Templates</label>
+                </div>
+            </fieldset>
+
+            <fieldset>
+                <legend>Core Specifications</legend>
+
+                <div class="form-group">
+                    <label for="therapeutic_area">Therapeutic Area *</label>
+                    <select id="therapeutic_area" name="therapeutic_area" required>
+                        <option value="">-- Select --</option>
+                        {% for area in therapeutic_areas %}
+                        <option value="{{ area }}">{{ area }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label>Target Markets *</label>
+                    <div class="checkbox-group">
+                        {% for market in markets %}
+                        <label><input type="checkbox" name="target_markets" value="{{ market }}"> {{ market }}</label>
+                        {% endfor %}
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label>Regulatory Frameworks *</label>
+                    <div class="checkbox-group">
+                        <label><input type="checkbox" name="regulatory_frameworks" value="FDA"> FDA (US)</label>
+                        <label><input type="checkbox" name="regulatory_frameworks" value="EMA"> EMA (EU)</label>
+                        <label><input type="checkbox" name="regulatory_frameworks" value="PMDA"> PMDA (Japan)</label>
+                        <label><input type="checkbox" name="regulatory_frameworks" value="NMPA"> NMPA (China)</label>
+                        <label><input type="checkbox" name="regulatory_frameworks" value="Health Canada"> Health Canada</label>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label>Languages *</label>
+                    <div class="checkbox-group">
+                        {% for lang in languages %}
+                        <label><input type="checkbox" name="languages" value="{{ lang }}"> {{ lang }}</label>
+                        {% endfor %}
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label>Output Formats *</label>
+                    <div class="checkbox-group">
+                        {% for fmt in output_formats %}
+                        <label><input type="checkbox" name="output_formats" value="{{ fmt }}"> {{ fmt }}</label>
+                        {% endfor %}
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label for="tone">Tone *</label>
+                    <select id="tone" name="tone" required>
+                        <option value="">-- Select --</option>
+                        {% for t in tones %}
+                        <option value="{{ t }}">{{ t }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+            </fieldset>
+
+            <fieldset>
+                <legend>Content Guidance</legend>
+
+                <div class="form-group">
+                    <label for="target_audience">Target Audience</label>
+                    <input type="text" id="target_audience" name="target_audience" placeholder="e.g., Payers, Healthcare providers">
+                </div>
+
+                <div class="form-group">
+                    <label for="focus_area">Focus Area</label>
+                    <input type="text" id="focus_area" name="focus_area" placeholder="e.g., Cost-effectiveness, Clinical differentiation">
+                </div>
+
+                <div class="form-group">
+                    <label for="key_messages">Key Messages</label>
+                    <textarea id="key_messages" name="key_messages" rows="4" placeholder="What are the core messages you want to communicate?"></textarea>
+                </div>
+
+                <div class="form-group">
+                    <label for="additional_requirements">Additional Requirements</label>
+                    <textarea id="additional_requirements" name="additional_requirements" rows="4" placeholder="Any other specific requirements or constraints?"></textarea>
+                </div>
+            </fieldset>
+
+            <fieldset>
+                <legend>Global Value Dossier (if selected)</legend>
+
+                <div class="form-group">
+                    <label>Dossier Sections</label>
+                    <div class="checkbox-group">
+                        {% for section in dossier_sections %}
+                        <label><input type="checkbox" name="dossier_sections" value="{{ section }}"> {{ section.replace('-', ' ').title() }}</label>
+                        {% endfor %}
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label for="regional_tender_spec">Regional Tender Specification (optional)</label>
+                    <textarea id="regional_tender_spec" name="regional_tender_spec" rows="4" placeholder="Paste regional tender requirements here, or leave blank"></textarea>
+                </div>
+            </fieldset>
+
+            <div class="action-bar">
+                <button type="submit" class="btn btn-primary">Save Specification</button>
+                <a href="{{ url_for('client_upload', engagement_id=engagement.id) }}" class="btn btn-secondary">Back</a>
+            </div>
+        </form>
+    {% endif %}
+</div>
+
+<style>
+fieldset {
+    border: 1px solid #ddd;
+    padding: 1em;
+    margin-bottom: 1.5em;
+    border-radius: 4px;
+}
+
+legend {
+    font-weight: bold;
+    padding: 0 0.5em;
+}
+
+.checkbox-group {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5em;
+}
+
+.checkbox-group label {
+    display: flex;
+    align-items: center;
+    gap: 0.5em;
+    font-weight: normal;
+}
+</style>
+{% endblock %}

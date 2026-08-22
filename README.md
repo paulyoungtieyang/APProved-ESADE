@@ -59,17 +59,37 @@ own branch:
 | [`docs/prototype-analysis.md`](docs/prototype-analysis.md) | What exists today — module breakdown, the agentic pipeline behind generation, traceability to user testing, open gaps |
 | [`docs/two-view-architecture.md`](docs/two-view-architecture.md) | Specification for the next build — Client and User views, prompt composition, multi-round refinement, audit trail |
 
-## Next build
+## The Python Prototype
 
-A two-view tool in Python with a launchable HTML interface:
+A two-view tool with a launchable HTML interface. **Status: Phase 1 complete — Client view,
+User view core flows, and audit trail are working. Generation wired in Phase 2.**
+
+### Quick start
+
+```bash
+pip install -r requirements.txt
+python app.py
+```
+
+Browser opens at `http://localhost:5000`. See [`BUILD_NOTES.md`](BUILD_NOTES.md) for the full setup and architecture.
+
+### What it does
 
 - **Client view** — upload data and specify requirements (tone, audience, regulations,
   target markets, key messages, brand assets). Recorded as immutable versioned briefs.
 - **User view** — APProved's expert composes prompts per deliverable type, inheriting the
   client's specifications and layering their own edits on top, with model selection across
   Anthropic, OpenAI, and Google.
-- **Multiple refinement rounds** between client and expert, with every brief version,
-  resolved prompt, model, and review decision written to an append-only audit trail.
+- **Audit trail** — every action (upload, brief version, consent, prompt composition) is
+  logged to an append-only SQLite database, traceable end-to-end.
+
+### What's ready to wire in Phase 2
+
+- LLM generation across providers (Anthropic, OpenAI, Google Gemini)
+- Parallel per-section drafting
+- Automated compliance scoring (judge gate)
+- Multi-round human review loops
+- Branded DOCX export
 
 ## Value proposition
 

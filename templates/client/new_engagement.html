@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+
+{% block title %}New Engagement — Client View{% endblock %}
+
+{% block content %}
+<div class="form-container">
+    <h2>Create a New Engagement</h2>
+
+    <form method="POST" class="form">
+        <div class="form-group">
+            <label for="client_name">Your Company Name</label>
+            <input type="text" id="client_name" name="client_name" required placeholder="e.g., Acme Therapeutics">
+            <small>This will be used to identify your engagement throughout the process.</small>
+        </div>
+
+        <button type="submit" class="btn btn-primary">Create Engagement</button>
+        <a href="/client" class="btn btn-secondary">Cancel</a>
+    </form>
+</div>
+{% endblock %}
