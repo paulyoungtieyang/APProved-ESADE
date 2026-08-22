@@ -1,0 +1,11 @@
+Event_ID,Patient_ID,Event_Type,Severity,Onset_Day,Duration_Days,Description,Action_Taken,Resolved
+AE001,CGM003,Skin Irritation,Mild,2,3,Mild erythema at sensor site,Sensor relocated,Yes
+AE002,CGM005,Hyperglycemia,Moderate,5,2,Blood glucose >250 mg/dL,Insulin dose adjusted,Yes
+AE003,CGM008,Device Error,Mild,12,1,Sensor reading failure,Sensor replaced,Yes
+AE004,CGM011,Calibration Issue,Moderate,4,3,Recalibration required frequently,Technical support contacted,Yes
+AE005,CGM013,Hypoglycemia,Moderate,7,1,Blood glucose <60 mg/dL overnight,Patient education on hypoglycemia management,Yes
+AE006,CGM005,Hyperglycemia,Moderate,9,2,Blood glucose >240 mg/dL,Carbohydrate adjustment,Yes
+AE007,CGM016,Allergic Reaction,Mild,6,2,Adhesive allergy,Alternative adhesive used,Yes
+AE008,CGM011,Calibration Issue,Moderate,8,2,System calibration drift,Recalibrated,Yes
+AE009,CGM013,Hypoglycemia,Moderate,11,1,Nocturnal hypoglycemia event,Insulin adjustment,Yes
+AE010,CGM017,Device Performance,Moderate,3,4,Intermittent connectivity,Sensor repositioned,Yes

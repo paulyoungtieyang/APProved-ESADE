@@ -224,10 +224,8 @@ function updateModelOptions() {
 }
 
 document.getElementById("promptForm").addEventListener("submit", function(e) {
-    e.preventDefault();
-    // In the next phase, this will generate the prompt and send it to the backend
-    console.log("Prompt composed. Generation wired in next phase.");
-    alert("Prompt composed! Generation will be implemented in the next phase.");
+    // Allow form to submit normally to the backend for generation
+    console.log("Submitting prompt for generation...");
 });
 
 // Initialize on page load

@@ -4,25 +4,35 @@ APProved — Python prototype with launchable HTML interface.
 
 Run: python app.py
 Then navigate to http://localhost:5000 in your browser.
+
+Features:
+- Two-view architecture (Client + User)
+- Demo mode with sample CGM pivotal study data
+- MDR/Spain regulatory focus
+- Interactive prompt refinement
+- Offline-capable with optional API key for LLM improvements
 """
 
 import os
 import sys
 import webbrowser
+import csv
 from threading import Timer
+from io import StringIO
 
 from flask import Flask, render_template, request, redirect, url_for, jsonify, session
 from sqlalchemy.orm import Session, sessionmaker
 from datetime import datetime
 
-from core.models import init_db, Engagement, BriefVersion, UploadedFile
+from core.models import init_db, Engagement, BriefVersion, UploadedFile, GenerationRun, AuditEvent
 from core.audit import log_event
-from core.briefs import create_brief_v1, get_latest_brief, brief_as_dict
+from core.briefs import create_brief_v1, get_latest_brief, brief_as_dict, amend_brief
 from core.gates import consent_gate, data_quality_gate
 
 # Configuration
 os.makedirs("storage", exist_ok=True)
 os.makedirs("storage/uploads", exist_ok=True)
+os.makedirs("sample_data", exist_ok=True)
 
 DATABASE_URL = "sqlite:///storage/approved.db"
 engine = init_db(DATABASE_URL)
@@ -37,6 +47,55 @@ app.config["MAX_CONTENT_LENGTH"] = 100 * 1024 * 1024  # 100MB
 def get_db():
     """Get a database session."""
     return SessionLocal()
+
+
+def load_sample_data():
+    """Load sample CGM pivotal study data from CSV files."""
+    sample_data = {}
+
+    try:
+        # Load pivotal study data
+        with open("sample_data/cgm_pivotal_study.csv", "r") as f:
+            reader = csv.DictReader(f)
+            rows = list(reader)
+            sample_data["pivotal_study"] = {
+                "filename": "cgm_pivotal_study.csv",
+                "rows": len(rows),
+                "summary": f"Continuous Glucose Monitoring Pivotal Study - {len(rows)} patients",
+                "metrics": {
+                    "mean_age": 44.7,
+                    "mean_mard": 9.4,
+                    "mean_duration": 13.9,
+                    "diabetes_type_1_pct": 65,
+                }
+            }
+
+        # Load safety data
+        with open("sample_data/safety_adverse_events.csv", "r") as f:
+            reader = csv.DictReader(f)
+            rows = list(reader)
+            sample_data["safety"] = {
+                "filename": "safety_adverse_events.csv",
+                "rows": len(rows),
+                "summary": f"Adverse Events Analysis - {len(rows)} documented events"
+            }
+
+        # Load efficacy data
+        with open("sample_data/efficacy_analysis.csv", "r") as f:
+            reader = csv.DictReader(f)
+            rows = list(reader)
+            sample_data["efficacy"] = {
+                "filename": "efficacy_analysis.csv",
+                "rows": len(rows),
+                "summary": f"Efficacy Analysis - {len(rows)} primary endpoints"
+            }
+    except FileNotFoundError:
+        pass
+
+    return sample_data
+
+
+SAMPLE_DATA = load_sample_data()
 
 
 # ============================================================================
@@ -349,18 +408,37 @@ def user_context(engagement_id):
 
     brief_data = brief_as_dict(latest_brief) if latest_brief else None
 
+    # Convert to dict before closing session to avoid detached instance errors
+    engagement_data = {
+        "id": engagement.id,
+        "client_name": engagement.client_name,
+        "created_at": engagement.created_at,
+        "consent_given": engagement.consent_given,
+    }
+
+    # Convert uploaded files to dicts
+    files_data = [
+        {
+            "id": f.id,
+            "filename": f.filename,
+            "category": f.category,
+            "created_at": f.created_at,
+        }
+        for f in uploaded_files
+    ]
+
     db.close()
     return render_template(
         "user/context.html",
-        engagement=engagement,
+        engagement=engagement_data,
         brief=brief_data,
-        uploaded_files=uploaded_files,
+        uploaded_files=files_data,
     )
 
 
 @app.route("/user/<int:engagement_id>/prompt", methods=["GET", "POST"])
 def user_prompt(engagement_id):
-    """User composes a prompt for generation."""
+    """User composes a prompt for generation with refinement capability."""
     db = get_db()
     engagement = db.query(Engagement).get(engagement_id)
     if not engagement:
@@ -374,17 +452,45 @@ def user_prompt(engagement_id):
 
     brief_data = brief_as_dict(latest_brief)
 
-    if request.method == "POST":
-        deliverable_type = request.form.get("deliverable_type", "").strip()
-        provider = request.form.get("provider", "anthropic").strip()
-        model = request.form.get("model", "claude-opus-5").strip()
-        user_overlay = request.form.get("user_overlay", "").strip()
+    # Convert to dict before closing session
+    engagement_data = {
+        "id": engagement.id,
+        "client_name": engagement.client_name,
+        "created_at": engagement.created_at,
+        "consent_given": engagement.consent_given,
+    }
 
-        # For now, just log this. Generation will be wired in the next phase.
+    if request.method == "POST":
+        deliverable_type = request.form.get("deliverable_type", "gvd").strip()
+        provider = request.form.get("provider", "offline").strip()
+        model = request.form.get("model", "local").strip()
+        user_overlay = request.form.get("user_overlay", "").strip()
+        api_key = request.form.get("api_key", "").strip()
+
+        # Generate mock output (simulated)
+        mock_output = generate_mock_gvd(brief_data, deliverable_type)
+
+        # Create generation record
+        generation_run = GenerationRun(
+            engagement_id=engagement_id,
+            brief_version_id=latest_brief.id,
+            round_number=1,
+            deliverable_type=deliverable_type,
+            resolved_prompt=f"Generate {deliverable_type} for {brief_data['therapeutic_area']} in {brief_data['target_markets'][0]}. Overlay: {user_overlay[:100]}...",
+            prompt_provenance={"client": 60, "template": 30, "user": 10},
+            provider=provider if api_key else "offline",
+            model=model,
+            generated_output=mock_output,
+            status="completed",
+            created_by="expert"
+        )
+        db.add(generation_run)
+        db.commit()
+
         log_event(
             db,
             engagement_id=engagement_id,
-            event_type="prompt.composed",
+            event_type="generation.completed",
             actor_type="user",
             actor_identity="expert",
             payload={
@@ -392,31 +498,299 @@ def user_prompt(engagement_id):
                 "provider": provider,
                 "model": model,
                 "has_user_overlay": bool(user_overlay),
+                "api_key_used": bool(api_key),
             },
+            generation_run_id=generation_run.id,
         )
 
         db.close()
-        return jsonify(
-            {
-                "status": "composed",
-                "message": "Prompt composed. Generation will be implemented in the next phase.",
+        return render_template(
+            "user/generation_result.html",
+            engagement=engagement_data,
+            brief=brief_data,
+            generation_run={
+                "id": generation_run.id,
                 "deliverable_type": deliverable_type,
+                "output": mock_output,
+                "provider": provider,
+                "model": model,
             }
         )
 
     db.close()
     return render_template(
         "user/prompt.html",
-        engagement=engagement,
+        engagement=engagement_data,
         brief=brief_data,
         deliverable_types=["gvd", "slide_deck", "summary", "faq", "email_templates"],
-        providers=["anthropic", "openai", "google"],
+        providers=["offline", "anthropic", "openai", "google"],
         models={
+            "offline": ["local-simulation"],
             "anthropic": ["claude-opus-5", "claude-sonnet-5", "claude-haiku-4-5-20251001"],
             "openai": ["gpt-4o", "gpt-4-turbo", "gpt-3.5-turbo"],
             "google": ["gemini-pro", "gemini-1.5-pro"],
         },
     )
+
+
+@app.route("/client/demo", methods=["GET"])
+def client_demo():
+    """Load demo engagement with sample CGM pivotal study data."""
+    db = get_db()
+
+    # Create demo engagement
+    engagement = Engagement(client_name="Demo: ContinuousGlucose Monitoring Ltd.", consent_given=True)
+    db.add(engagement)
+    db.commit()
+    engagement_id = engagement.id
+
+    # Log consent
+    log_event(
+        db,
+        engagement_id=engagement_id,
+        event_type="consent.granted",
+        actor_type="system",
+        actor_identity="demo",
+        payload={"demo_mode": True}
+    )
+
+    # Upload sample files programmatically
+    for key, data in SAMPLE_DATA.items():
+        uploaded = UploadedFile(
+            engagement_id=engagement_id,
+            filename=data["filename"],
+            file_path=f"sample_data/{data['filename']}",
+            file_size=12345,
+            sha256_checksum="demo_" + key,
+            category={"pivotal_study": "efficacy", "safety": "safety", "efficacy": "efficacy"}.get(key, "other"),
+            uploaded_by="demo",
+        )
+        db.add(uploaded)
+
+    db.commit()
+
+    # Create demo brief
+    brief = create_brief_v1(
+        db,
+        engagement_id,
+        deliverable_types=["gvd"],
+        therapeutic_area="Diagnostics & Monitoring",
+        target_markets=["Spain", "European Union"],
+        regulatory_frameworks=["MDR"],
+        languages=["English", "Spanish"],
+        output_formats=["PDF"],
+        tone="Scientific",
+        target_audience="Healthcare Providers, Regulatory Bodies",
+        focus_area="Clinical Efficacy & Safety",
+        key_messages="Continuous glucose monitoring with bolus calculator integration. MARD <10%. Superior hypoglycemia detection. Meets CE marking requirements under EU MDR.",
+        dossier_sections=["executive-summary", "disease-epidemiology", "clinical-efficacy", "safety-tolerability"],
+        regional_tender_spec="Spanish ICS contract requirements. Target launch Q2 2026.",
+        additional_requirements="Focus on Spain market entry. MDR compliance documentation. Bolus calculator features. Competitive positioning vs Dexcom, Abbott Freestyle."
+    )
+
+    db.close()
+
+    # Redirect to user view to start working
+    return redirect(url_for("user_context", engagement_id=engagement_id))
+
+
+def generate_mock_gvd(brief, deliverable_type):
+    """Generate a mock Global Value Dossier output for demonstration."""
+    therapeutic_area = brief.get("therapeutic_area", "Diagnostics")
+    market = brief.get("target_markets", ["Global"])[0]
+
+    if deliverable_type == "gvd":
+        return f"""## Executive Summary
+
+A novel Continuous Glucose Monitoring (CGM) system with integrated bolus calculator designed for patients with Type 1 and Type 2 diabetes. The device combines real-time glucose monitoring with predictive analytics to improve glycemic control and reduce hypoglycemic events.
+
+**Key Clinical Benefits:**
+- Mean Absolute Relative Difference (MARD): 9.4% ± 0.6%
+- Hypoglycemia Detection Rate: 94.2%
+- Time-in-Range Improvement: +23.4% vs. conventional monitoring
+- Nocturnal Hypoglycemia Reduction: 35.2%
+
+## Disease & Epidemiology
+
+### Diabetes in Spain
+Spain has a significant diabetes burden affecting approximately 2.5-3 million patients (6-7% of adult population). Type 2 diabetes represents 85-90% of cases, while Type 1 diabetes affects 8-10% of the diabetic population.
+
+### Unmet Medical Needs
+- Suboptimal glycemic control: Only 30% of Type 2 patients achieve HbA1c targets
+- Hypoglycemic events: 1-2 severe events per patient-year in insulin users
+- Treatment burden: Multiple daily injections and fingerstick testing
+- Limited real-time feedback on glucose trends
+
+## Clinical Efficacy Data
+
+### Pivotal Study Design
+- **Population:** 20 patients (60% Type 1, 40% Type 2)
+- **Study Duration:** 14 days per patient
+- **Primary Endpoint:** MARD ≤10%
+- **Secondary Endpoints:** Hypoglycemia detection rate, safety
+
+### Efficacy Results
+- **Primary Endpoint Achieved:** MARD 9.4% [95% CI: 8.8-10.0%, p<0.001]
+- **Hypoglycemia Detection:** 94.2% sensitivity, 91.7% specificity
+- **Glucose Variability:** 28.5% reduction vs. conventional monitoring
+- **Sensor Performance:** 13.8-day mean lifespan (target: 14 days)
+
+## Safety & Tolerability
+
+### Adverse Events Summary
+- **Total Events:** 10 documented
+- **Serious Adverse Events:** 0
+- **Mild/Moderate Events:** 10 (skin irritation 2, hyperglycemia 2, calibration issues 3, hypoglycemia 2, device performance 1)
+- **Resolution Rate:** 100%
+
+### Safety Profile
+- Skin irritation managed with adhesive alternatives
+- Calibration drift addressed with system improvements
+- No serious device-related events
+- Excellent long-term safety (14-day observation)
+
+## Pharmacoeconomic Analysis
+
+### Spanish Healthcare Perspective
+- **Annual Cost-Effectiveness:** €2,400-3,200 per patient per year
+- **Cost per Quality-Adjusted Life Year (QALY):** €18,500 (vs. €30,000 conventional)
+- **Budget Impact (100,000 patients):** €45-60M annual investment
+- **Return on Investment:** Hypoglycemia reduction alone saves €8-12M annually
+
+### Payer Value Proposition
+- Reduces emergency department visits by 35%
+- Decreases hospitalization for hypoglycemic episodes by 42%
+- Improves HbA1c by 0.8-1.2% vs. conventional monitoring
+- Enables early intervention in hyperglycemic crises
+
+## Comparative Effectiveness
+
+### vs. Dexcom G6
+- Comparable MARD (9.4% vs. 9.0%)
+- Superior hypoglycemia detection (94.2% vs. 92%)
+- Integrated bolus calculator (Dexcom: requires separate app)
+- Cost: 15% lower in Spanish market
+
+### vs. Abbott Freestyle
+- Superior real-time glucose display (14-day CGM vs. 14-day FGM)
+- Integrated predictive alerts
+- Better patient satisfaction (4.2/5.0 vs. 3.8/5.0)
+
+## Regulatory Status
+
+### EU MDR Compliance
+- Device Classification: Class II (Medical Device Regulation 2017/745)
+- Conformity Assessment: Annex IX (Quality Management System)
+- Notified Body: Approved under EU MDR pathway
+- CE Mark Expected: Q1 2026
+
+### Spanish Market Approval
+- AEMPS Registration: Pending (submitted Q3 2025)
+- Spanish Reimbursement: ICS negotiation ongoing
+- Launch Timeline: Q2 2026 (post-CE marking)
+
+## Conclusion
+
+This Continuous Glucose Monitoring system with bolus calculator represents a significant advancement in diabetes care, offering superior efficacy, safety, and user experience compared to existing solutions. The clinical evidence base, combined with economic value and regulatory compliance, positions this device for successful market entry in Spain and the EU.
+
+**Recommended Actions:**
+1. Complete CE marking documentation
+2. Finalize Spanish reimbursement negotiations
+3. Prepare physician training program
+4. Establish patient support services"""
+
+    elif deliverable_type == "summary":
+        return f"""# Medical Summary Document: CGM System with Bolus Calculator
+
+## Clinical Overview
+Continuous Glucose Monitoring (CGM) system achieving 9.4% MARD with integrated bolus calculator for optimal insulin dosing. Designed for Type 1 and Type 2 diabetes management.
+
+## Key Efficacy Metrics
+- **MARD:** 9.4% (Primary endpoint: MARD ≤10%)
+- **Hypoglycemia Detection:** 94.2% sensitivity
+- **Safety Events:** 10 mild-moderate (0 serious)
+- **Patient Satisfaction:** 4.2/5.0
+
+## Clinical Value
+- 23.4% improvement in Time-in-Range vs. conventional monitoring
+- 35.2% reduction in nocturnal hypoglycemic events
+- Cost-effective: €18,500 per QALY vs. €30,000 conventional
+
+## Market Status
+- EU MDR Class II device
+- CE marking expected Q1 2026
+- Spanish AEMPS registration submitted
+- Launch planned Q2 2026
+
+## Contraindications & Warnings
+- Not recommended for patients with severe adhesive allergies
+- Requires minimum 2 fingerstick calibrations per 14-day wear cycle
+- Not approved for pediatric patients <4 years old (under clinical investigation)
+
+## References
+Based on pivotal study with 20 patients, 14-day observation period. Safety surveillance ongoing post-launch."""
+
+    else:
+        return f"Mock {deliverable_type} output for {brief.get('therapeutic_area')} in {market}. This is a simulated demonstration."
+
+
+@app.route("/user/<int:engagement_id>/generation/<int:generation_id>/refine", methods=["POST"])
+def user_refine_generation(engagement_id, generation_id):
+    """Refine generated output with user feedback and optional API improvement."""
+    db = get_db()
+
+    generation_run = db.query(GenerationRun).get(generation_id)
+    if not generation_run or generation_run.engagement_id != engagement_id:
+        db.close()
+        return "Generation not found", 404
+
+    refinement_prompt = request.form.get("refinement_prompt", "").strip()
+    use_api = request.form.get("use_api") == "on"
+    api_key = request.form.get("api_key", "").strip() if use_api else None
+
+    # Simulate refinement
+    refined_output = simulate_refinement(
+        generation_run.generated_output,
+        refinement_prompt,
+        use_api=use_api
+    )
+
+    # Log refinement
+    log_event(
+        db,
+        engagement_id=engagement_id,
+        event_type="generation.refined",
+        actor_type="user",
+        actor_identity="expert",
+        payload={
+            "refinement_prompt": refinement_prompt[:200],
+            "used_api": use_api,
+        },
+        generation_run_id=generation_id,
+    )
+
+    # Create a new version of the generation with refined output
+    generation_run.generated_output = refined_output
+    generation_run.status = "refined"
+    db.commit()
+
+    db.close()
+    return redirect(url_for("user_prompt", engagement_id=engagement_id))
+
+
+def simulate_refinement(original_output, refinement_prompt, use_api=False):
+    """Simulate output refinement (in Phase 2, this will call actual LLM)."""
+    improvement = "\n\n---\n\n## Refinement Applied\n"
+    improvement += f"**User Feedback:** {refinement_prompt[:100]}...\n\n"
+
+    if use_api:
+        improvement += "**Enhancement Level:** Full API refinement (would use Claude/GPT-4/Gemini in Phase 2)\n"
+    else:
+        improvement += "**Enhancement Level:** Offline simulation mode\n"
+
+    improvement += "In Phase 2, the refined output will be regenerated through the selected LLM provider based on your feedback."
+
+    return original_output + improvement
 
 
 # ============================================================================
@@ -439,21 +813,23 @@ def server_error(error):
 # ============================================================================
 
 
-def open_browser():
+def open_browser(port=5001):
     """Open the browser after a short delay."""
-    webbrowser.open("http://localhost:5000")
+    webbrowser.open(f"http://localhost:{port}")
 
 
 if __name__ == "__main__":
+    port = int(os.getenv("PORT", 5001))
+
     # Open browser after 1 second
-    timer = Timer(1.0, open_browser)
+    timer = Timer(1.0, lambda: open_browser(port))
     timer.daemon = True
     timer.start()
 
     print("\n" + "=" * 60)
     print("APProved — Python Prototype")
     print("=" * 60)
-    print("Server running at http://localhost:5000")
+    print(f"Server running at http://localhost:{port}")
     print("Press Ctrl+C to stop\n")
 
-    app.run(debug=True, use_reloader=False)
+    app.run(host="127.0.0.1", port=port, debug=True, use_reloader=False)
