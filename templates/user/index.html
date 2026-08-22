@@ -26,11 +26,7 @@
                     <td>{{ engagement.client_name }}</td>
                     <td>{{ engagement.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
                     <td>
-                        {% if engagement.brief_versions %}
-                            <span class="badge badge-success">v{{ engagement.brief_versions[-1].version }}</span>
-                        {% else %}
-                            <span class="badge badge-warning">No brief</span>
-                        {% endif %}
+                        <span class="badge badge-success">Ready for Review</span>
                     </td>
                     <td>
                         <a href="{{ url_for('user_context', engagement_id=engagement.id) }}" class="btn btn-sm">View</a>

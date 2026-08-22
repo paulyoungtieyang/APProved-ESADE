@@ -390,8 +390,20 @@ def user_index():
         .order_by(Engagement.created_at.desc())
         .all()
     )
+
+    # Convert to dicts before closing session
+    engagements_data = [
+        {
+            "id": e.id,
+            "client_name": e.client_name,
+            "created_at": e.created_at,
+            "consent_given": e.consent_given,
+        }
+        for e in engagements
+    ]
+
     db.close()
-    return render_template("user/index.html", engagements=engagements)
+    return render_template("user/index.html", engagements=engagements_data)
 
 
 @app.route("/user/<int:engagement_id>", methods=["GET"])
