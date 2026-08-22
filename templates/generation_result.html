@@ -1,0 +1,120 @@
+{% extends "base.html" %}
+{% import "_icons.html" as icons %}
+{% block title %}{{ title }}{% endblock %}
+
+{% block content %}
+<div class="page page--lg">
+    <div class="row row--between row--start row--wrap mb-6" style="gap:1rem">
+        <div>
+            <h1 style="font-size:1.5rem;font-weight:600;margin-bottom:.5rem">{{ title }}</h1>
+            <p class="text-muted">{{ subtitle }}</p>
+        </div>
+        <div class="row row--wrap" style="gap:.5rem">
+            <span class="badge {% if run.provider == 'offline' %}badge--slate{% else %}badge--green{% endif %}">
+                {{ run.model }}{% if run.provider == 'offline' %} · offline{% endif %}
+            </span>
+            <span class="badge badge--blue">Round {{ run.round }}</span>
+        </div>
+    </div>
+
+    <div class="form-grid" style="grid-template-columns:1fr;gap:1.5rem">
+        <div class="card">
+            <div class="card__header">
+                <div class="row row--between">
+                    <h2 class="card__title">Generated Output</h2>
+                    <div class="row" style="gap:.5rem">
+                        <a href="{{ url_for('download_document', run_id=run.id) }}" class="btn btn--outline btn--sm">
+                            {{ icons.icon("download", 16) }} Download
+                        </a>
+                        <a href="{{ back_url }}" class="btn btn--ghost btn--sm">Back</a>
+                    </div>
+                </div>
+            </div>
+            <div class="card__body">
+                <div class="output">{{ run.output | markdown | safe }}</div>
+            </div>
+        </div>
+
+        <div class="form-grid form-grid--2" style="align-items:start">
+            {# ------------------------------------------------------- Refine #}
+            <div class="card">
+                <div class="card__header">
+                    <h2 class="card__title">Refine This Draft</h2>
+                    <p class="card__subtitle">Each refinement increments the round and is logged.</p>
+                </div>
+                <div class="card__body">
+                    <form method="POST" action="{{ url_for('refine_generation', run_id=run.id) }}">
+                        <div class="field">
+                            <label class="field__label" for="instruction">What should change?</label>
+                            <textarea class="textarea textarea--tall" name="instruction" id="instruction" required
+                                      placeholder="Examples:
+- Expand the Spanish market opportunity
+- Emphasise the bolus calculator risk controls
+- Add detail on the CCAA tender scoring criteria
+- Strengthen the indirect-comparison caveat"></textarea>
+                        </div>
+
+                        <div class="form-grid form-grid--2">
+                            <div class="field">
+                                <label class="field__label" for="provider">Provider</label>
+                                <select class="select" name="provider" id="provider">
+                                    <option value="offline">Offline simulation (no API key)</option>
+                                    <option value="anthropic">Anthropic</option>
+                                    <option value="openai">OpenAI</option>
+                                    <option value="google">Google (Gemini)</option>
+                                </select>
+                            </div>
+                            <div class="field">
+                                <label class="field__label" for="model">Model</label>
+                                <input class="input" name="model" id="model" placeholder="Provider default">
+                            </div>
+                        </div>
+
+                        <div class="field" id="apiKeyField" hidden>
+                            <label class="field__label" for="api_key">API Key (optional)</label>
+                            <input class="input" type="password" name="api_key" id="api_key"
+                                   placeholder="Used for this request only — never stored">
+                        </div>
+
+                        <button type="submit" class="btn btn--primary btn--block mt-4">
+                            {{ icons.icon("sparkles", 16) }} Refine Output
+                        </button>
+                    </form>
+                </div>
+            </div>
+
+            {# ------------------------------------------------- Prompt record #}
+            <div class="card">
+                <div class="card__header">
+                    <h2 class="card__title">Resolved Prompt</h2>
+                    <p class="card__subtitle">Exactly what was sent to the model, kept for traceability.</p>
+                </div>
+                <div class="card__body">
+                    <div class="provenance mb-4">
+                        <span class="provenance__key"><span class="provenance__swatch swatch--client"></span> Layer 1 client</span>
+                        <span class="provenance__key"><span class="provenance__swatch swatch--template"></span> Layer 2 template</span>
+                        <span class="provenance__key"><span class="provenance__swatch swatch--expert"></span> Layer 3 expert</span>
+                    </div>
+                    <div class="prompt-preview">{{ run.prompt }}</div>
+                    <p class="text-xs text-faint mt-4">
+                        Generated {{ run.created_at.strftime('%b %d, %Y at %H:%M') }} ·
+                        <a class="link-cta" href="{{ url_for('audit_trail') }}">view in audit trail</a>
+                    </p>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function () {
+    var provider = document.getElementById("provider");
+    var field = document.getElementById("apiKeyField");
+    provider.addEventListener("change", function () {
+        field.hidden = provider.value === "offline";
+    });
+})();
+</script>
+{% endblock %}

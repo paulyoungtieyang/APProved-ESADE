@@ -1,0 +1,164 @@
+{% extends "base.html" %}
+{% import "_icons.html" as icons %}
+{% block title %}Dashboard{% endblock %}
+
+{% block content %}
+<div class="page page--xl">
+
+    <div class="row row--between row--start row--wrap mb-8" style="gap:1.5rem">
+        <div style="flex:1;min-width:18rem">
+            <h1 style="font-size:1.875rem;font-weight:600;margin-bottom:.5rem">Welcome to APProved</h1>
+            <p class="text-muted">Unlocking compliance as growth</p>
+            <p class="text-sm text-faint mt-4">
+                Active engagement — <strong class="text-strong">{{ engagement }}</strong><br>
+                {{ brief.therapeutic_area }}
+            </p>
+        </div>
+
+        <div class="card" style="width:19rem;flex-shrink:0">
+            <div class="card__body" style="padding:1rem">
+                <label class="field__label">Regulatory Track</label>
+                <form method="POST" action="{{ url_for('regulatory_track') }}" class="segmented">
+                    <button type="submit" name="track" value="global"
+                            class="segmented__label" style="flex:1;border:none;
+                            {% if regulatory_track == 'global' %}background:var(--blue-600);color:#fff{% endif %}">
+                        {{ icons.icon("globe", 16) }} Global
+                    </button>
+                    <button type="submit" name="track" value="local"
+                            class="segmented__label" style="flex:1;border:none;
+                            {% if regulatory_track == 'local' %}background:var(--blue-600);color:#fff{% endif %}">
+                        {{ icons.icon("building", 16) }} Local Affiliate
+                    </button>
+                </form>
+                <p class="field__hint">
+                    {% if regulatory_track == 'global' %}
+                        Focus on global regulatory submissions and MDR conformity.
+                    {% else %}
+                        Focus on Spanish market entry, tenders and local value assets.
+                    {% endif %}
+                </p>
+            </div>
+        </div>
+    </div>
+
+    {# ---------------------------------------------------------------- Checklist #}
+    <div class="card mb-8">
+        <div class="card__body">
+            <div class="row row--between row--start mb-4">
+                <div class="row">
+                    <span style="background:var(--blue-100);color:var(--blue-600);border-radius:var(--radius);padding:.5rem;display:flex">
+                        {{ icons.icon("clipboard-list", 20) }}
+                    </span>
+                    <div>
+                        <h2 class="card__title">Setup Checklist</h2>
+                        <p class="card__subtitle">Complete these steps to produce a submission-ready dossier</p>
+                    </div>
+                </div>
+                <span class="badge badge--blue">
+                    {{ checklist.values() | select | list | length }} / {{ checklist | length }} done
+                </span>
+            </div>
+
+            <div class="checklist">
+                {% for step in onboarding_steps %}
+                    <a href="{{ url_for(step.endpoint) }}"
+                       class="checklist__item {% if checklist[step.id] %}is-done{% endif %}">
+                        <span class="checklist__box">
+                            {% if checklist[step.id] %}{{ icons.icon("check", 12) }}{% endif %}
+                        </span>
+                        <span class="checklist__label">{{ step.title }}</span>
+                    </a>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+
+    {# ------------------------------------------------------------------- Stats #}
+    <div class="stat-grid">
+        <div class="card"><div class="card__body">
+            <div class="stat__label">
+                <span>Documents Generated</span>
+                <span style="color:var(--green-600);display:flex">{{ icons.icon("trending-up", 16) }}</span>
+            </div>
+            <div class="stat__value">{{ documents_generated }}</div>
+            <div class="stat__delta">Across dossier sections and MSL materials</div>
+        </div></div>
+
+        <div class="card"><div class="card__body">
+            <div class="stat__label">
+                <span>Dossier Completion</span>
+                <span style="color:var(--blue-600);display:flex">{{ icons.icon("check-circle", 16) }}</span>
+            </div>
+            <div class="stat__value">{{ sections_done }} / {{ total_sections }}</div>
+            <div class="stat__delta">MDR-aligned Global Value Dossier sections</div>
+        </div></div>
+
+        <div class="card"><div class="card__body">
+            <div class="stat__label">
+                <span>Patients in Dataset</span>
+                <span style="color:var(--purple-600);display:flex">{{ icons.icon("activity", 16) }}</span>
+            </div>
+            <div class="stat__value">{{ stats.study.patients or 0 }}</div>
+            <div class="stat__delta">
+                {% if stats.study.mean_mard %}Mean MARD {{ stats.study.mean_mard }}%{% else %}Upload data to populate{% endif %}
+            </div>
+        </div></div>
+    </div>
+
+    {# ----------------------------------------------------------- Quick actions #}
+    <div class="mb-8">
+        <h2 class="section-title">Quick Actions</h2>
+        <div class="action-grid">
+            {% set actions = [
+                ("Upload Clinical Data", "Add CSV or XLSX trial data for AI-assisted writing", "upload", "upload", "bg-blue-500"),
+                ("Select Regulations", "Choose MDR, AEMPS and other applicable frameworks", "scale", "regulations", "bg-purple-500"),
+                ("Generate Global Dossier", "Produce the value dossier section by section", "file-stack", "global_dossier", "bg-green-500"),
+                ("MSL Materials", "Generate scientific communication materials", "message-square", "msl_material", "bg-orange-500")
+            ] %}
+            {% for title, description, icon_name, endpoint, colour in actions %}
+                <a href="{{ url_for(endpoint) }}" class="card card--hover action-tile">
+                    <div class="action-tile__top">
+                        <span class="action-tile__icon {{ colour }}">{{ icons.icon(icon_name, 24) }}</span>
+                        <span class="action-tile__arrow">{{ icons.icon("arrow-right", 20) }}</span>
+                    </div>
+                    <h3>{{ title }}</h3>
+                    <p>{{ description }}</p>
+                </a>
+            {% endfor %}
+        </div>
+    </div>
+
+    {# --------------------------------------------------------- Recent activity #}
+    <div class="row row--between mb-4">
+        <h2 class="section-title" style="margin:0">Recent Activity</h2>
+        <a href="{{ url_for('audit_trail') }}" class="link-cta">
+            Full audit trail {{ icons.icon("arrow-right", 16) }}
+        </a>
+    </div>
+    <div class="card divide-y">
+        {% for item in activity %}
+            <div class="list-row">
+                <div>
+                    <h4 class="text-strong">{{ item.title }}</h4>
+                    <p class="text-sm text-faint">
+                        {{ item.date.strftime('%b %d, %Y · %H:%M') }} — {{ item.actor }}
+                    </p>
+                </div>
+                <span class="badge badge--green">{{ item.status }}</span>
+            </div>
+        {% else %}
+            <div class="empty-state">
+                {{ icons.icon("file-text", 48) }}
+                <h3>No activity yet</h3>
+                <p>Upload data or generate a document to start the audit trail.</p>
+            </div>
+        {% endfor %}
+    </div>
+
+    <form method="POST" action="{{ url_for('reset_demo') }}" class="mt-6">
+        <button type="submit" class="btn btn--outline btn--sm">
+            {{ icons.icon("refresh", 16) }} Reset demo data
+        </button>
+    </form>
+</div>
+{% endblock %}

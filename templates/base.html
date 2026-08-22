@@ -3,35 +3,99 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{% block title %}APProved{% endblock %}</title>
+    <title>{% block title %}APProved{% endblock %} · APProved</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📋</text></svg>">
     {% block extra_css %}{% endblock %}
 </head>
 <body>
-    <nav class="navbar">
-        <div class="navbar-brand">
-            <h1><a href="/">APProved</a></h1>
-            <p class="tagline">Medical Writing Platform</p>
-        </div>
-        <ul class="navbar-menu">
-            <li><a href="/">Home</a></li>
-            <li><a href="/client">Client View</a></li>
-            <li><a href="/user">User View</a></li>
-        </ul>
-    </nav>
+{% import "_icons.html" as icons %}
 
-    <div class="container">
-        {% if error %}
-            <div class="alert alert-error">{{ error }}</div>
-        {% endif %}
+<header class="app-header">
+    <div class="app-header__inner">
+        <a class="brand" href="{{ url_for('dashboard') }}">
+            <span class="brand__mark">{{ icons.icon("file-text", 24) }}</span>
+            <span>
+                <span class="brand__name">APProved</span><br>
+                <span class="brand__tagline">Medical Writing Platform</span>
+            </span>
+        </a>
 
-        {% block content %}{% endblock %}
+        <form method="POST" action="{{ url_for('switch_role') }}" style="display:contents">
+            <input type="hidden" name="next" value="{{ request.path }}">
+            <button type="submit" class="role-badge" title="Switch role">
+                {{ icons.icon("shield", 16) }}
+                <span>{{ current_role_label }}</span>
+            </button>
+        </form>
+
+        <button class="menu-toggle" id="menuToggle" aria-label="Toggle navigation" aria-expanded="false">
+            {{ icons.icon("menu", 24) }}
+        </button>
+    </div>
+</header>
+
+<div class="app-body">
+    <aside class="sidebar">
+        <nav class="sidebar__nav">
+            {% for item in nav_items %}
+                {% if item.section %}
+                    <div class="nav-section-label">{{ item.section }}</div>
+                {% else %}
+                    <a href="{{ url_for(item.endpoint) }}"
+                       class="nav-item {% if request.endpoint == item.endpoint %}is-active{% endif %}">
+                        {{ icons.icon(item.icon, 20) }}
+                        <span>{{ item.name }}</span>
+                    </a>
+                {% endif %}
+            {% endfor %}
+        </nav>
+    </aside>
+
+    <div class="mobile-nav" id="mobileNav">
+        <nav class="sidebar__nav">
+            {% for item in nav_items %}
+                {% if item.section %}
+                    <div class="nav-section-label">{{ item.section }}</div>
+                {% else %}
+                    <a href="{{ url_for(item.endpoint) }}"
+                       class="nav-item {% if request.endpoint == item.endpoint %}is-active{% endif %}">
+                        {{ icons.icon(item.icon, 20) }}
+                        <span>{{ item.name }}</span>
+                    </a>
+                {% endif %}
+            {% endfor %}
+        </nav>
     </div>
 
-    <footer>
-        <p>&copy; 2026 APProved. Unlocking compliance as growth.</p>
-    </footer>
+    <main class="app-main">
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="alert alert--{{ 'green' if category == 'success' else 'red' if category == 'error' else 'blue' }}">
+                        {{ icons.icon("info", 20) }}
+                        <div class="flex-1"><div class="alert__body"><p>{{ message }}</p></div></div>
+                    </div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
 
-    {% block extra_js %}{% endblock %}
+        {% block content %}{% endblock %}
+    </main>
+</div>
+
+<script>
+(function () {
+    var toggle = document.getElementById("menuToggle");
+    var nav = document.getElementById("mobileNav");
+    if (toggle && nav) {
+        toggle.addEventListener("click", function () {
+            var open = nav.classList.toggle("is-open");
+            toggle.setAttribute("aria-expanded", String(open));
+        });
+    }
+})();
+</script>
+{% block extra_js %}{% endblock %}
 </body>
 </html>

@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% import "_icons.html" as icons %}
+{% block title %}Policy News{% endblock %}
+
+{% block content %}
+<div class="page page--md">
+    <div class="page-header">
+        <h1>Policy &amp; Regulatory News</h1>
+        <p>Regulatory developments affecting the MDR conformity route and Spanish market entry.</p>
+    </div>
+
+    <div class="card filter-bar">
+        <div class="chip-row">
+            {% for category in categories %}
+                <a href="{{ url_for('policy_news', category=category) }}"
+                   class="chip {% if selected_category == category %}is-active{% endif %}">
+                    {{ category }}
+                </a>
+            {% endfor %}
+        </div>
+    </div>
+
+    <div class="stack-4">
+        {% for item in items %}
+            <article class="card news-card">
+                <div class="news-card__meta">
+                    <span class="badge badge--blue">{{ item.category }}</span>
+                    <span class="text-xs text-faint">{{ item.source }}</span>
+                </div>
+                <h2 class="news-card__title">{{ item.title }}</h2>
+                <p class="news-card__summary">{{ item.summary }}</p>
+                <div class="news-card__foot">
+                    <div class="news-card__stats">
+                        <span class="inline-meta">{{ icons.icon("calendar", 16) }} {{ item.date }}</span>
+                        <span class="inline-meta">
+                            {{ icons.icon("tag", 16) }}
+                            {% for tag in item.tags %}<span class="tag">{{ tag }}</span>{% endfor %}
+                        </span>
+                    </div>
+                    <span class="text-xs text-faint">Reference feed — demo content</span>
+                </div>
+            </article>
+        {% else %}
+            <div class="card empty-state">
+                {{ icons.icon("newspaper", 48) }}
+                <h3>No items in this category</h3>
+                <p>Choose another filter to see more updates.</p>
+            </div>
+        {% endfor %}
+    </div>
+</div>
+{% endblock %}

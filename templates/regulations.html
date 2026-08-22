@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+{% import "_icons.html" as icons %}
+{% block title %}Regulations{% endblock %}
+
+{% block content %}
+<div class="page page--md">
+    <div class="page-header">
+        <h1>Select Regulatory Frameworks</h1>
+        <p>Choose the requirements that apply to this device. Selections are written to the brief
+           and shape every generated section.</p>
+    </div>
+
+    <form method="POST" id="regForm">
+        <div class="alert alert--blue" id="summary" {% if not selected_count %}hidden{% endif %}>
+            {{ icons.icon("info", 20) }}
+            <div class="flex-1">
+                <div class="alert__title">
+                    <span id="count">{{ selected_count }}</span> framework(s) selected
+                </div>
+                <div class="alert__body">
+                    <p>Documents will be generated against the selected regulatory requirements.</p>
+                </div>
+            </div>
+        </div>
+
+        {% for region, items in grouped.items() %}
+            <h2 class="section-title" style="margin-top:1.5rem">{{ region }}</h2>
+            <div class="stack-4">
+                {% for regulation in items %}
+                    <label class="option-card">
+                        <input type="checkbox" name="regulations" value="{{ regulation.id }}"
+                               {% if regulation.id in selected_ids %}checked{% endif %}>
+                        <span class="option-card__inner">
+                            <span class="option-card__check">{{ icons.icon("check-circle", 24) }}</span>
+                            <span class="option-card__body">
+                                <span class="option-card__title">{{ regulation.name }}</span>
+                                <span class="option-card__desc">{{ regulation.description }}</span>
+                                <span class="requirements-box">
+                                    <h4>Key requirements</h4>
+                                    <ul>
+                                        {% for requirement in regulation.requirements %}
+                                            <li>• {{ requirement }}</li>
+                                        {% endfor %}
+                                    </ul>
+                                </span>
+                            </span>
+                        </span>
+                    </label>
+                {% endfor %}
+            </div>
+        {% endfor %}
+
+        <div class="btn-row btn-row--end mt-6">
+            <button type="submit" class="btn btn--primary">Save Regulatory Selection</button>
+        </div>
+    </form>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function () {
+    var form = document.getElementById("regForm");
+    var summary = document.getElementById("summary");
+    var count = document.getElementById("count");
+
+    form.addEventListener("change", function () {
+        var selected = form.querySelectorAll('input[name="regulations"]:checked').length;
+        count.textContent = selected;
+        summary.hidden = selected === 0;
+    });
+})();
+</script>
+{% endblock %}

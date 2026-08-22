@@ -1,185 +1,106 @@
-# APProved — Python Prototype Build Notes
+# Build Notes
 
-## Quick Start
-
-### 1. Install dependencies
-
-```bash
-pip install -r requirements.txt
-```
-
-### 2. Copy env file
-
-```bash
-cp .env.example .env
-```
-
-(Optional — the app will work with defaults.)
-
-### 3. Launch
-
-```bash
-python app.py
-```
-
-The server starts on `http://localhost:5000` and your browser opens automatically.
+What is actually built, what is stubbed, and what would come next. Written so the gap
+between the demo and a production system is explicit rather than implied.
 
 ---
 
-## What's Implemented
+## Built and working
 
-### Client View (✓ Complete)
-- **Consent flow** — audit logging consent gate runs first
-- **Engagement creation** — client creates a new engagement
-- **File upload** — drag-and-drop or browse; every file gets a SHA-256 checksum
-- **Specification form** — client fills in tone, audience, regulations, markets, languages, key messages, brand assets
-- **Brief versioning** — specifications are stored as immutable versioned briefs
-- **Review & summary** — client sees the full brief before it goes to the expert team
+### Interface
+- Full port of the Figma dashboard: sticky header, sidebar, twelve pages, responsive down to
+  mobile. Design tokens documented in [`docs/interface-spec.md`](docs/interface-spec.md).
+- Server-rendered Jinja2, no build step, no runtime dependencies beyond the four packages in
+  `requirements.txt`.
 
-### User View (✓ Core flows, generation pending)
-- **Engagement list** — expert sees all engagements ready for work
-- **Inherited context** — expert views the client's brief (read-only)
-- **Prompt workspace** — three-layer composition:
-  - Layer 1: Client baseline (with per-field injection toggles)
-  - Layer 2: Deliverable template (auto-generated)
-  - Layer 3: Expert overlay (editable)
-- **Model selection** — choose provider (Anthropic, OpenAI, Google) and model
-- **API key handling** — user provides key for this run (never stored)
+### Data ingestion
+- Drag-and-drop and browse upload for CSV, XLSX, PDF, DOCX, TXT — unsupported types rejected
+  with a message rather than a stack trace.
+- CSV parsed with `csv.DictReader`; XLSX with `openpyxl` in read-only mode. **Verified**: a
+  20-row × 13-column XLSX round-trips and parses identically to its CSV twin.
+- SHA-256 checksum per file, stored and surfaced in the UI.
+- Statistics derived from the actual rows — cohort size, mean age, mean MARD, wear duration,
+  type-1 share, adverse events by type and severity, endpoint table with CIs and p-values.
+  Every figure quoted in a generated draft traces to one of these.
 
-### Audit Trail (✓ Complete)
-- **Append-only database** — immutable records of every action
-- **Event types** — consent, upload, brief creation, prompt composition
-- **Traceability** — every event tagged with actor, timestamp, and references
+### Generation
+- Three-layer prompt composition (client baseline / deliverable template / expert overlay),
+  with the resolved prompt persisted alongside the output.
+- Ten dossier sections, generated one at a time through `/api/dossier/section`, each with its
+  own `generation_run` row and audit event. Progress in the UI reflects committed state.
+- Four MSL material types with audience / focus / tone / key-message configuration.
+- Refinement loop: each pass increments a round counter; history is not overwritten.
+- Offline engine is deterministic and grounded — it will say "not reported in the uploaded
+  dataset" rather than inventing an endpoint.
+- Live providers (Anthropic, OpenAI, Google) over stdlib `urllib`. Keys come from the UI or
+  the environment, are used for exactly one call, and are never persisted or logged. A failed
+  live call falls back to the offline draft.
 
-### Database (✓ SQLite with full schema)
-- Engagement, BriefVersion, UploadedFile, GenerationRun, ReviewRound, AuditEvent
-- Versioned briefs with change tracking
-- File checksums for reproducibility
+### Governance
+- Append-only audit trail — every upload, brief revision, generation, refinement and export.
+  **Verified**: no API key material reaches the log.
+- Immutable versioned briefs with field-level diffs (`core/briefs.py`).
+- RBAC across four roles. **Verified server-side**: MSL and Compliance Officer receive a 403
+  from the generation endpoint, not merely a hidden button.
 
----
-
-## What's Next
-
-These will be wired in Phase 2:
-
-1. **Generation** — POST to `/api/generate/` runs the LLM via Anthropic/OpenAI/Google SDK
-2. **Judge scoring** — automated compliance check before human review
-3. **Review loops** — internal expert review + client feedback rounds
-4. **Branded export** — DOCX with client's brand template
-
----
-
-## Project Structure
-
-```
-app.py                    # Main entry point — python app.py launches server & browser
-core/
-  models.py               # SQLAlchemy ORM + audit trail schema
-  audit.py                # Append-only event logging
-  briefs.py               # Brief versioning + field diffs
-  gates.py                # Consent + data quality gates
-  llm.py                  # Provider abstraction (stub — ready for phase 2)
-templates/
-  base.html               # Base layout
-  index.html              # Landing page
-  client/
-    index.html            # Client engagements list
-    new_engagement.html
-    consent.html
-    upload.html
-    specification.html
-    review.html
-  user/
-    index.html            # User engagements list
-    context.html          # View client brief
-    prompt.html           # Compose prompt
-  404.html, 500.html
-static/
-  css/
-    style.css             # Global styles + responsive layout
-storage/
-  .gitkeep
-requirements.txt
-.env.example
-BUILD_NOTES.md (this file)
-```
+### Device-specific
+- Bolus calculator implementing carb dose + correction dose + CGM trend adjustment − insulin
+  on board, with hypoglycaemia / ketone / falling-trend warnings. **Verified** against hand
+  calculation.
 
 ---
 
-## Testing the Flow
+## Stubbed or simplified
 
-### Client Side
-1. Navigate to `/client`
-2. Create new engagement → "Acme Therapeutics"
-3. Provide consent to audit logging
-4. Upload a sample file (efficacy, safety, etc.)
-5. Fill in specifications (tone, markets, regulatory, etc.)
-6. Review brief
-
-### User Side
-1. Navigate to `/user`
-2. See the client's engagement listed
-3. Click "View" to see the brief (read-only context)
-4. Click "Compose Prompt" to try the prompt workspace
-5. Layer 1 shows client baseline; Layer 3 is your editable overlay
-6. Select a provider and model
-
-Every action is logged to the audit trail. Check `storage/approved.db` (SQLite) to see records.
+| Area | Current state | What production needs |
+|---|---|---|
+| **Export format** | Markdown download | Real PDF and DOCX with the client's template, headers and pagination |
+| **Policy news** | Static curated list | Live feed from EUR-Lex, MDCG and AEMPS |
+| **Resources** | Static list, no files | Document store with the actual guidance PDFs |
+| **Brand guidelines** | Upload controls present, unused | Apply `.potx` themes and brand rules to generated decks |
+| **Literature search** | Database selected but not queried | PubMed / Embase integration feeding the evidence base |
+| **Translation** | Languages selected, output stays English | Per-language generation with terminology control |
+| **Judge scoring** | Schema exists (`judge_score`, `judge_rubric`), unused | Automated rubric pass before human review |
+| **Review rounds** | `ReviewRound` model exists, no UI | Client and expert review with accept / revise / decline |
+| **Auth** | Role switcher in the header | Real accounts, SSO, per-user audit identity |
+| **Multi-tenancy** | One engagement per browser session | Organisations, projects, member permissions |
+| **Storage** | Local SQLite + filesystem | Postgres, object storage, encryption at rest |
 
 ---
 
-## Database
+## Known constraints
 
-SQLite file is at `storage/approved.db`. To inspect:
-
-```bash
-sqlite3 storage/approved.db
-> .tables
-> SELECT * FROM audit_event;
-> .exit
-```
-
----
-
-## API & Generation (Stub)
-
-The `/user/<engagement_id>/prompt` POST endpoint currently logs the prompt composition but doesn't invoke LLM generation. Phase 2 will wire this up using `core/llm.py` with provider clients.
+- **Session-scoped engagement.** One demo engagement per browser session, auto-seeded on
+  first load. `Engagement` supports many; there is no picker UI yet.
+- **Section key encoding.** The section id is prefixed onto `resolved_prompt` as
+  `"<section-id>::<prompt>"` because `GenerationRun` has no section column. It works and is
+  queryable, but a dedicated column is the right fix before this grows.
+- **HTML weight.** The nav icon set is inlined twice per page (sidebar + mobile drawer),
+  which dominates page size. A `<symbol>` sprite would fix it if it ever matters.
+- **Markdown renderer.** `markdown_to_html` in `app.py` handles headings, lists, bold, code,
+  rules and blockquotes — enough for what this app generates, not a general renderer. Swap in
+  a real library if drafts start arriving with tables or nested lists.
+- **Health-economic figures** in the drafts are illustrative, not modelled.
 
 ---
 
-## Notes for Phase 2
+## Not a medical device
 
-- **Parallel drafting** — split generation into per-section calls (drafting.py from the main repo)
-- **Judge scoring** — automated rubric before human review (judge.py)
-- **Review loops** — internal expert + client feedback with brief amendment support (review.py)
-- **DOCX export** — brand template support (docx_export.py)
-
----
-
-## Troubleshooting
-
-**"Port 5000 already in use"**
-- Kill the process: `lsof -ti:5000 | xargs kill -9`
-- Or edit `app.py` to change the port
-
-**"Database locked"**
-- Close any open SQLite connections
-- Delete `storage/approved.db` and restart (development only)
-
-**"Template not found"**
-- Verify the `templates/` directory exists and templates are there
-- Check Flask `template_folder` in `app.py`
+The bolus calculator demonstrates a documented algorithm. It is not validated, not certified,
+and must not inform real dosing. The generated dossier text is a drafting aid requiring
+expert review before any regulatory use.
 
 ---
 
-## Architecture Notes
+## Verification performed
 
-The two-view split (Client + User) is deliberate and mirrors `review.py`'s evaluator-optimizer pattern:
+Each of these was executed against the running app, not assumed:
 
-- **Client view** collects requirements and provides feedback
-- **User view** (APProved expert) composes prompts and iterates
-- **Audit trail** makes both sides accountable and traceability reproducible
-
-API keys are never stored — they're session-scoped and redacted from audit logs.
-
-Client text (requirements, files, feedback) is treated as *data, not instructions* — never sent directly to the LLM as prompt commands.
+- All twelve routes return 200; unknown paths return 404.
+- Ten dossier sections generate, persist and appear in the library.
+- XLSX upload parses to 20 rows × 13 columns; `.exe` is rejected.
+- Bolus calculation matches hand arithmetic (75 g, 210 mg/dL, rising, 1.5 U IOB → 7.7 U).
+- Refinement advances a section from round 1 to round 2 with a revision note.
+- Submission wizard carries state across all five steps and writes to the brief.
+- Role cycling blocks generation for MSL and Compliance Officer with a 403.
+- Audit trail records twelve events for the seeded demo with no key material.

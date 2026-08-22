@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+{% import "_icons.html" as icons %}
+{% block title %}Audit Trail{% endblock %}
+
+{% block content %}
+<div class="page page--lg">
+    <div class="page-header">
+        <h1>Audit Trail</h1>
+        <p>Append-only record of every action in this engagement. Nothing here is ever updated or
+           deleted — this is the traceability evidence for the dossier.</p>
+    </div>
+
+    <div class="alert alert--blue">
+        {{ icons.icon("shield", 20) }}
+        <div class="flex-1">
+            <div class="alert__title">{{ events | length }} recorded events</div>
+            <div class="alert__body">
+                <p>Brief v{{ brief.version }} · {{ brief.regulatory_frameworks | join(', ') }} ·
+                   {{ brief.target_markets | join(', ') }}. API keys are never captured in payloads.</p>
+            </div>
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="divide-y">
+            {% for event in events %}
+                <div class="section-row">
+                    <button type="button" class="section-row__head">
+                        <span class="section-row__main">
+                            <span style="color:var(--blue-600);display:flex;margin-top:.125rem">
+                                {{ icons.icon("history", 20) }}
+                            </span>
+                            <span class="flex-1">
+                                <span class="section-row__title">{{ event.type }}</span><br>
+                                <span class="section-row__desc">
+                                    {{ event.created_at.strftime('%b %d, %Y · %H:%M:%S') }} — {{ event.actor }}
+                                </span>
+                            </span>
+                        </span>
+                        <span class="chevron">{{ icons.icon("chevron-down", 20) }}</span>
+                    </button>
+                    <div class="section-row__panel" hidden>
+                        <div class="prompt-preview">{{ event.payload }}</div>
+                    </div>
+                </div>
+            {% else %}
+                <div class="empty-state">
+                    {{ icons.icon("history", 48) }}
+                    <h3>No events yet</h3>
+                    <p>Upload data or generate a document to start the trail.</p>
+                </div>
+            {% endfor %}
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+document.querySelectorAll(".section-row__head").forEach(function (head) {
+    head.addEventListener("click", function () {
+        var row = head.closest(".section-row");
+        var panel = row.querySelector(".section-row__panel");
+        panel.hidden = !panel.hidden;
+        row.classList.toggle("is-open", !panel.hidden);
+    });
+});
+</script>
+{% endblock %}

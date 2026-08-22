@@ -1,847 +1,1194 @@
 #!/usr/bin/env python3
 """
-APProved — Python prototype with launchable HTML interface.
+APProved — medical writing platform prototype.
 
-Run: python app.py
-Then navigate to http://localhost:5000 in your browser.
+    python3 app.py      →  http://localhost:5001
 
-Features:
-- Two-view architecture (Client + User)
-- Demo mode with sample CGM pivotal study data
-- MDR/Spain regulatory focus
-- Interactive prompt refinement
-- Offline-capable with optional API key for LLM improvements
+A Flask port of the APProved Figma prototype: dashboard shell with a sidebar,
+ten working pages, and a demo engagement pre-loaded with continuous glucose
+monitoring (CGM) pivotal study data on an EU MDR / Spain launch track.
+
+Runs entirely offline. Supplying an API key on the generation pages switches the
+same prompts over to a live Anthropic / OpenAI / Google model.
 """
 
+from __future__ import annotations
+
+import json
 import os
-import sys
-import webbrowser
-import csv
-from threading import Timer
-from io import StringIO
-
-from flask import Flask, render_template, request, redirect, url_for, jsonify, session
-from sqlalchemy.orm import Session, sessionmaker
+import shutil
 from datetime import datetime
+from threading import Timer
+from werkzeug.utils import secure_filename
 
-from core.models import init_db, Engagement, BriefVersion, UploadedFile, GenerationRun, AuditEvent
-from core.audit import log_event
-from core.briefs import create_brief_v1, get_latest_brief, brief_as_dict, amend_brief
-from core.gates import consent_gate, data_quality_gate
+from flask import (
+    Flask, flash, jsonify, redirect, render_template, request, send_file, session, url_for
+)
+from sqlalchemy.orm import sessionmaker
 
+from core import content, dataset, llm
+from core.audit import log_event, get_engagement_trail
+from core.briefs import brief_as_dict, create_brief_v1, get_latest_brief
+from core.models import (
+    AuditEvent, BriefVersion, Engagement, GenerationRun, UploadedFile, init_db
+)
+
+# --------------------------------------------------------------------------
 # Configuration
-os.makedirs("storage", exist_ok=True)
-os.makedirs("storage/uploads", exist_ok=True)
-os.makedirs("sample_data", exist_ok=True)
+# --------------------------------------------------------------------------
 
-DATABASE_URL = "sqlite:///storage/approved.db"
-engine = init_db(DATABASE_URL)
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+STORAGE_DIR = os.path.join(BASE_DIR, "storage")
+UPLOAD_DIR = os.path.join(STORAGE_DIR, "uploads")
+SAMPLE_DIR = os.path.join(BASE_DIR, "sample_data")
+
+os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+engine = init_db(f"sqlite:///{os.path.join(STORAGE_DIR, 'approved.db')}")
 SessionLocal = sessionmaker(bind=engine)
 
-# Flask app
 app = Flask(__name__, template_folder="templates", static_folder="static")
-app.config["SECRET_KEY"] = os.getenv("SECRET_KEY", "dev-change-in-production")
-app.config["MAX_CONTENT_LENGTH"] = 100 * 1024 * 1024  # 100MB
+app.config["SECRET_KEY"] = os.getenv("SECRET_KEY", "dev-secret-change-in-production")
+app.config["MAX_CONTENT_LENGTH"] = 100 * 1024 * 1024  # 100 MB per the upload page copy
+
+DEMO_CLIENT_NAME = "ContinuousGlucose Monitoring Ltd."
+
+SAMPLE_FILES = [
+    ("cgm_pivotal_study.csv", "clinical"),
+    ("safety_adverse_events.csv", "safety"),
+    ("efficacy_analysis.csv", "efficacy"),
+]
+
+NAV_ITEMS = [
+    {"section": "Workspace"},
+    {"name": "Dashboard", "endpoint": "dashboard", "icon": "file-text"},
+    {"name": "Upload Clinical Data", "endpoint": "upload", "icon": "upload"},
+    {"name": "Regulations", "endpoint": "regulations", "icon": "scale"},
+    {"name": "Policy News", "endpoint": "policy_news", "icon": "newspaper"},
+    {"section": "Generate"},
+    {"name": "Global Value Dossier", "endpoint": "global_dossier", "icon": "file-stack"},
+    {"name": "MSL Materials", "endpoint": "msl_material", "icon": "message-square"},
+    {"name": "Bolus Calculator", "endpoint": "bolus_calculator", "icon": "calculator"},
+    {"section": "Deliver"},
+    {"name": "Document Library", "endpoint": "documents", "icon": "folder-open"},
+    {"name": "Resources", "endpoint": "resources", "icon": "book-open"},
+    {"name": "Submit", "endpoint": "submission", "icon": "send"},
+    {"section": "Governance"},
+    {"name": "Audit Trail", "endpoint": "audit_trail", "icon": "history"},
+    {"name": "Settings", "endpoint": "settings", "icon": "settings"},
+]
+
+
+# --------------------------------------------------------------------------
+# Session / engagement helpers
+# --------------------------------------------------------------------------
 
 
 def get_db():
-    """Get a database session."""
     return SessionLocal()
 
 
-def load_sample_data():
-    """Load sample CGM pivotal study data from CSV files."""
-    sample_data = {}
-
-    try:
-        # Load pivotal study data
-        with open("sample_data/cgm_pivotal_study.csv", "r") as f:
-            reader = csv.DictReader(f)
-            rows = list(reader)
-            sample_data["pivotal_study"] = {
-                "filename": "cgm_pivotal_study.csv",
-                "rows": len(rows),
-                "summary": f"Continuous Glucose Monitoring Pivotal Study - {len(rows)} patients",
-                "metrics": {
-                    "mean_age": 44.7,
-                    "mean_mard": 9.4,
-                    "mean_duration": 13.9,
-                    "diabetes_type_1_pct": 65,
-                }
-            }
-
-        # Load safety data
-        with open("sample_data/safety_adverse_events.csv", "r") as f:
-            reader = csv.DictReader(f)
-            rows = list(reader)
-            sample_data["safety"] = {
-                "filename": "safety_adverse_events.csv",
-                "rows": len(rows),
-                "summary": f"Adverse Events Analysis - {len(rows)} documented events"
-            }
-
-        # Load efficacy data
-        with open("sample_data/efficacy_analysis.csv", "r") as f:
-            reader = csv.DictReader(f)
-            rows = list(reader)
-            sample_data["efficacy"] = {
-                "filename": "efficacy_analysis.csv",
-                "rows": len(rows),
-                "summary": f"Efficacy Analysis - {len(rows)} primary endpoints"
-            }
-    except FileNotFoundError:
-        pass
-
-    return sample_data
+def current_role() -> str:
+    return session.get("role", "admin")
 
 
-SAMPLE_DATA = load_sample_data()
+def can(permission: str) -> bool:
+    """Permission check against the role matrix stored in the session."""
+    roles = session.get("roles") or content.DEFAULT_ROLES
+    role_id = current_role()
+    for role in roles:
+        if role["id"] == role_id:
+            return bool(role["permissions"].get(permission))
+    return False
 
 
-# ============================================================================
-# Client Routes
-# ============================================================================
-
-
-@app.route("/", methods=["GET"])
-def index():
-    """Landing page — choose Client or User view."""
-    return render_template("index.html")
-
-
-@app.route("/client", methods=["GET"])
-def client_index():
-    """Client view — list engagements."""
-    db = get_db()
-    engagements = db.query(Engagement).order_by(Engagement.created_at.desc()).all()
-    db.close()
-    return render_template("client/index.html", engagements=engagements)
-
-
-@app.route("/client/new", methods=["GET", "POST"])
-def client_new_engagement():
-    """Client creates a new engagement."""
-    if request.method == "POST":
-        client_name = request.form.get("client_name", "").strip()
-        if not client_name:
-            return render_template("client/new_engagement.html", error="Client name is required")
-
-        db = get_db()
-        engagement = Engagement(client_name=client_name)
-        db.add(engagement)
-        db.commit()
-        engagement_id = engagement.id
-        db.close()
-
-        log_event(
-            db,
-            engagement_id=engagement_id,
-            event_type="engagement.created",
-            actor_type="client",
-            actor_identity="client",
-            payload={"client_name": client_name},
-        )
-
-        return redirect(url_for("client_consent", engagement_id=engagement_id))
-
-    return render_template("client/new_engagement.html")
-
-
-@app.route("/client/<int:engagement_id>/consent", methods=["GET", "POST"])
-def client_consent(engagement_id):
-    """Client gives consent for audit logging."""
-    db = get_db()
-    engagement = db.query(Engagement).get(engagement_id)
-    if not engagement:
-        db.close()
-        return "Engagement not found", 404
-
-    if engagement.consent_given:
-        db.close()
-        return redirect(url_for("client_upload", engagement_id=engagement_id))
-
-    if request.method == "POST":
-        consent_given = request.form.get("consent") == "on"
-        result = consent_gate(db, engagement_id, consent_given)
-
-        if not result["allowed"]:
-            db.close()
-            return render_template(
-                "client/consent.html",
-                engagement=engagement,
-                error="You must consent to audit logging to proceed.",
-            )
-
-        db.close()
-        return redirect(url_for("client_upload", engagement_id=engagement_id))
-
-    db.close()
-    return render_template("client/consent.html", engagement=engagement)
-
-
-@app.route("/client/<int:engagement_id>/upload", methods=["GET", "POST"])
-def client_upload(engagement_id):
-    """Client uploads data files."""
-    db = get_db()
-    engagement = db.query(Engagement).get(engagement_id)
-    if not engagement or not engagement.consent_given:
-        db.close()
-        return redirect(url_for("client_consent", engagement_id=engagement_id))
-
-    uploaded_files = db.query(UploadedFile).filter_by(engagement_id=engagement_id).all()
-
-    if request.method == "POST":
-        if "file" not in request.files:
-            db.close()
-            return render_template(
-                "client/upload.html",
-                engagement=engagement,
-                uploaded_files=uploaded_files,
-                error="No file part",
-            )
-
-        file = request.files["file"]
-        category = request.form.get("category", "").strip()
-
-        if file.filename == "" or not category:
-            db.close()
-            return render_template(
-                "client/upload.html",
-                engagement=engagement,
-                uploaded_files=uploaded_files,
-                error="File and category are required",
-            )
-
-        # Save file
-        import hashlib
-
-        file_content = file.read()
-        sha256_hash = hashlib.sha256(file_content).hexdigest()
-        file_path = f"engagement_{engagement_id}_{sha256_hash[:8]}_{file.filename}"
-        full_path = os.path.join("storage/uploads", file_path)
-
-        with open(full_path, "wb") as f:
-            f.write(file_content)
-
-        # Record in database
-        uploaded = UploadedFile(
-            engagement_id=engagement_id,
-            filename=file.filename,
-            file_path=file_path,
-            file_size=len(file_content),
-            sha256_checksum=sha256_hash,
-            category=category,
-        )
-        db.add(uploaded)
-        db.commit()
-
-        log_event(
-            db,
-            engagement_id=engagement_id,
-            event_type="data.uploaded",
-            actor_type="client",
-            actor_identity="client",
-            payload={
-                "filename": file.filename,
-                "size": len(file_content),
-                "checksum": sha256_hash,
-                "category": category,
-            },
-            uploaded_file_id=uploaded.id,
-        )
-
-        db.close()
-        return redirect(url_for("client_upload", engagement_id=engagement_id))
-
-    db.close()
-    return render_template(
-        "client/upload.html",
-        engagement=engagement,
-        uploaded_files=uploaded_files,
-        categories=["efficacy", "safety", "demographics", "pharmacokinetic", "quality_of_life"],
+def seed_demo_engagement(db) -> int:
+    """Create the CGM / MDR / Spain demo engagement with its sample dataset."""
+    engagement = Engagement(
+        client_name=DEMO_CLIENT_NAME,
+        consent_given=True,
+        consent_timestamp=datetime.utcnow(),
     )
-
-
-@app.route("/client/<int:engagement_id>/specification", methods=["GET", "POST"])
-def client_specification(engagement_id):
-    """Client specifies deliverable requirements."""
-    db = get_db()
-    engagement = db.query(Engagement).get(engagement_id)
-    if not engagement or not engagement.consent_given:
-        db.close()
-        return redirect(url_for("client_index"))
-
-    # Check if there are uploaded files
-    has_uploads = db.query(UploadedFile).filter_by(engagement_id=engagement_id).count() > 0
-
-    latest_brief = get_latest_brief(db, engagement_id)
-
-    if request.method == "POST":
-        deliverable_types = request.form.getlist("deliverable_types")
-        therapeutic_area = request.form.get("therapeutic_area", "").strip()
-        target_markets = request.form.getlist("target_markets")
-        regulatory_frameworks = request.form.getlist("regulatory_frameworks")
-        languages = request.form.getlist("languages")
-        output_formats = request.form.getlist("output_formats")
-        tone = request.form.get("tone", "").strip()
-        target_audience = request.form.get("target_audience", "").strip()
-        focus_area = request.form.get("focus_area", "").strip()
-        key_messages = request.form.get("key_messages", "").strip()
-        dossier_sections = request.form.getlist("dossier_sections")
-        regional_tender_spec = request.form.get("regional_tender_spec", "").strip()
-        additional_requirements = request.form.get("additional_requirements", "").strip()
-
-        if not all([deliverable_types, therapeutic_area, target_markets, tone]):
-            db.close()
-            return render_template(
-                "client/specification.html",
-                engagement=engagement,
-                error="All required fields must be filled",
-                has_uploads=has_uploads,
-                latest_brief=latest_brief,
-            )
-
-        # Create or amend brief
-        if not latest_brief:
-            brief = create_brief_v1(
-                db,
-                engagement_id,
-                deliverable_types=deliverable_types,
-                therapeutic_area=therapeutic_area,
-                target_markets=target_markets,
-                regulatory_frameworks=regulatory_frameworks,
-                languages=languages,
-                output_formats=output_formats,
-                tone=tone,
-                target_audience=target_audience,
-                focus_area=focus_area,
-                key_messages=key_messages,
-                dossier_sections=dossier_sections,
-                regional_tender_spec=regional_tender_spec,
-                additional_requirements=additional_requirements,
-            )
-        else:
-            # TODO: amend brief if needed
-            pass
-
-        db.close()
-        return redirect(url_for("client_review", engagement_id=engagement_id))
-
-    db.close()
-    return render_template(
-        "client/specification.html",
-        engagement=engagement,
-        has_uploads=has_uploads,
-        latest_brief=latest_brief,
-        therapeutic_areas=["Cardiometabolic", "Oncology", "Immunology", "Neurology", "Diagnostics & Monitoring"],
-        markets=["Global (All Regions)", "United States", "European Union", "Japan", "China", "Australia", "Canada"],
-        languages=["English", "French", "German", "Japanese", "Chinese"],
-        output_formats=["PDF", "Word (DOCX)", "PowerPoint (PPTX)"],
-        tones=["Scientific", "Balanced", "Accessible"],
-        dossier_sections=[
-            "executive-summary",
-            "disease-epidemiology",
-            "clinical-efficacy",
-            "safety-tolerability",
-            "pharmacoeconomic-analysis",
-            "quality-of-life",
-            "comparative-effectiveness",
-            "target-population",
-        ],
-    )
-
-
-@app.route("/client/<int:engagement_id>/review", methods=["GET"])
-def client_review(engagement_id):
-    """Client reviews their brief and engagement summary."""
-    db = get_db()
-    engagement = db.query(Engagement).get(engagement_id)
-    if not engagement:
-        db.close()
-        return "Engagement not found", 404
-
-    latest_brief = get_latest_brief(db, engagement_id)
-    uploaded_files = db.query(UploadedFile).filter_by(engagement_id=engagement_id).all()
-
-    brief_data = brief_as_dict(latest_brief) if latest_brief else None
-
-    db.close()
-    return render_template(
-        "client/review.html",
-        engagement=engagement,
-        brief=brief_data,
-        uploaded_files=uploaded_files,
-    )
-
-
-# ============================================================================
-# User Routes
-# ============================================================================
-
-
-@app.route("/user", methods=["GET"])
-def user_index():
-    """User view — list available engagements."""
-    db = get_db()
-    # Only show engagements that have given consent and have a brief
-    engagements = (
-        db.query(Engagement)
-        .filter(Engagement.consent_given == True)
-        .order_by(Engagement.created_at.desc())
-        .all()
-    )
-
-    # Convert to dicts before closing session
-    engagements_data = [
-        {
-            "id": e.id,
-            "client_name": e.client_name,
-            "created_at": e.created_at,
-            "consent_given": e.consent_given,
-        }
-        for e in engagements
-    ]
-
-    db.close()
-    return render_template("user/index.html", engagements=engagements_data)
-
-
-@app.route("/user/<int:engagement_id>", methods=["GET"])
-def user_context(engagement_id):
-    """User views the client's brief and context."""
-    db = get_db()
-    engagement = db.query(Engagement).get(engagement_id)
-    if not engagement or not engagement.consent_given:
-        db.close()
-        return "Engagement not found", 404
-
-    latest_brief = get_latest_brief(db, engagement_id)
-    uploaded_files = db.query(UploadedFile).filter_by(engagement_id=engagement_id).all()
-
-    brief_data = brief_as_dict(latest_brief) if latest_brief else None
-
-    # Convert to dict before closing session to avoid detached instance errors
-    engagement_data = {
-        "id": engagement.id,
-        "client_name": engagement.client_name,
-        "created_at": engagement.created_at,
-        "consent_given": engagement.consent_given,
-    }
-
-    # Convert uploaded files to dicts
-    files_data = [
-        {
-            "id": f.id,
-            "filename": f.filename,
-            "category": f.category,
-            "created_at": f.created_at,
-        }
-        for f in uploaded_files
-    ]
-
-    db.close()
-    return render_template(
-        "user/context.html",
-        engagement=engagement_data,
-        brief=brief_data,
-        uploaded_files=files_data,
-    )
-
-
-@app.route("/user/<int:engagement_id>/prompt", methods=["GET", "POST"])
-def user_prompt(engagement_id):
-    """User composes a prompt for generation with refinement capability."""
-    db = get_db()
-    engagement = db.query(Engagement).get(engagement_id)
-    if not engagement:
-        db.close()
-        return "Engagement not found", 404
-
-    latest_brief = get_latest_brief(db, engagement_id)
-    if not latest_brief:
-        db.close()
-        return "No brief found for this engagement", 404
-
-    brief_data = brief_as_dict(latest_brief)
-
-    # Convert to dict before closing session
-    engagement_data = {
-        "id": engagement.id,
-        "client_name": engagement.client_name,
-        "created_at": engagement.created_at,
-        "consent_given": engagement.consent_given,
-    }
-
-    if request.method == "POST":
-        deliverable_type = request.form.get("deliverable_type", "gvd").strip()
-        provider = request.form.get("provider", "offline").strip()
-        model = request.form.get("model", "local").strip()
-        user_overlay = request.form.get("user_overlay", "").strip()
-        api_key = request.form.get("api_key", "").strip()
-
-        # Generate mock output (simulated)
-        mock_output = generate_mock_gvd(brief_data, deliverable_type)
-
-        # Create generation record
-        generation_run = GenerationRun(
-            engagement_id=engagement_id,
-            brief_version_id=latest_brief.id,
-            round_number=1,
-            deliverable_type=deliverable_type,
-            resolved_prompt=f"Generate {deliverable_type} for {brief_data['therapeutic_area']} in {brief_data['target_markets'][0]}. Overlay: {user_overlay[:100]}...",
-            prompt_provenance={"client": 60, "template": 30, "user": 10},
-            provider=provider if api_key else "offline",
-            model=model,
-            generated_output=mock_output,
-            status="completed",
-            created_by="expert"
-        )
-        db.add(generation_run)
-        db.commit()
-
-        log_event(
-            db,
-            engagement_id=engagement_id,
-            event_type="generation.completed",
-            actor_type="user",
-            actor_identity="expert",
-            payload={
-                "deliverable_type": deliverable_type,
-                "provider": provider,
-                "model": model,
-                "has_user_overlay": bool(user_overlay),
-                "api_key_used": bool(api_key),
-            },
-            generation_run_id=generation_run.id,
-        )
-
-        db.close()
-        return render_template(
-            "user/generation_result.html",
-            engagement=engagement_data,
-            brief=brief_data,
-            generation_run={
-                "id": generation_run.id,
-                "deliverable_type": deliverable_type,
-                "output": mock_output,
-                "provider": provider,
-                "model": model,
-            }
-        )
-
-    db.close()
-    return render_template(
-        "user/prompt.html",
-        engagement=engagement_data,
-        brief=brief_data,
-        deliverable_types=["gvd", "slide_deck", "summary", "faq", "email_templates"],
-        providers=["offline", "anthropic", "openai", "google"],
-        models={
-            "offline": ["local-simulation"],
-            "anthropic": ["claude-opus-5", "claude-sonnet-5", "claude-haiku-4-5-20251001"],
-            "openai": ["gpt-4o", "gpt-4-turbo", "gpt-3.5-turbo"],
-            "google": ["gemini-pro", "gemini-1.5-pro"],
-        },
-    )
-
-
-@app.route("/client/demo", methods=["GET"])
-def client_demo():
-    """Load demo engagement with sample CGM pivotal study data."""
-    db = get_db()
-
-    # Create demo engagement
-    engagement = Engagement(client_name="Demo: ContinuousGlucose Monitoring Ltd.", consent_given=True)
     db.add(engagement)
     db.commit()
     engagement_id = engagement.id
 
-    # Log consent
-    log_event(
-        db,
-        engagement_id=engagement_id,
-        event_type="consent.granted",
-        actor_type="system",
-        actor_identity="demo",
-        payload={"demo_mode": True}
-    )
+    log_event(db, engagement_id, "consent.granted", "client", "demo",
+              {"scope": "audit logging and AI generation"})
 
-    # Upload sample files programmatically
-    for key, data in SAMPLE_DATA.items():
-        uploaded = UploadedFile(
+    for filename, category in SAMPLE_FILES:
+        source = os.path.join(SAMPLE_DIR, filename)
+        if not os.path.exists(source):
+            continue
+        stored_name = f"{engagement_id}_{filename}"
+        destination = os.path.join(UPLOAD_DIR, stored_name)
+        shutil.copyfile(source, destination)
+
+        record = UploadedFile(
             engagement_id=engagement_id,
-            filename=data["filename"],
-            file_path=f"sample_data/{data['filename']}",
-            file_size=12345,
-            sha256_checksum="demo_" + key,
-            category={"pivotal_study": "efficacy", "safety": "safety", "efficacy": "efficacy"}.get(key, "other"),
+            filename=filename,
+            file_path=stored_name,
+            file_size=os.path.getsize(destination),
+            sha256_checksum=dataset.checksum(destination),
+            category=category,
             uploaded_by="demo",
         )
-        db.add(uploaded)
+        db.add(record)
+        db.commit()
+        log_event(db, engagement_id, "data.uploaded", "client", "demo",
+                  {"filename": filename, "category": category,
+                   "checksum": record.sha256_checksum},
+                  uploaded_file_id=record.id)
 
-    db.commit()
-
-    # Create demo brief
-    brief = create_brief_v1(
-        db,
-        engagement_id,
-        deliverable_types=["gvd"],
-        therapeutic_area="Diagnostics & Monitoring",
-        target_markets=["Spain", "European Union"],
-        regulatory_frameworks=["MDR"],
-        languages=["English", "Spanish"],
-        output_formats=["PDF"],
-        tone="Scientific",
-        target_audience="Healthcare Providers, Regulatory Bodies",
-        focus_area="Clinical Efficacy & Safety",
-        key_messages="Continuous glucose monitoring with bolus calculator integration. MARD <10%. Superior hypoglycemia detection. Meets CE marking requirements under EU MDR.",
-        dossier_sections=["executive-summary", "disease-epidemiology", "clinical-efficacy", "safety-tolerability"],
-        regional_tender_spec="Spanish ICS contract requirements. Target launch Q2 2026.",
-        additional_requirements="Focus on Spain market entry. MDR compliance documentation. Bolus calculator features. Competitive positioning vs Dexcom, Abbott Freestyle."
-    )
-
-    db.close()
-
-    # Redirect to user view to start working
-    return redirect(url_for("user_context", engagement_id=engagement_id))
-
-
-def generate_mock_gvd(brief, deliverable_type):
-    """Generate a mock Global Value Dossier output for demonstration."""
-    therapeutic_area = brief.get("therapeutic_area", "Diagnostics")
-    market = brief.get("target_markets", ["Global"])[0]
-
-    if deliverable_type == "gvd":
-        return f"""## Executive Summary
-
-A novel Continuous Glucose Monitoring (CGM) system with integrated bolus calculator designed for patients with Type 1 and Type 2 diabetes. The device combines real-time glucose monitoring with predictive analytics to improve glycemic control and reduce hypoglycemic events.
-
-**Key Clinical Benefits:**
-- Mean Absolute Relative Difference (MARD): 9.4% ± 0.6%
-- Hypoglycemia Detection Rate: 94.2%
-- Time-in-Range Improvement: +23.4% vs. conventional monitoring
-- Nocturnal Hypoglycemia Reduction: 35.2%
-
-## Disease & Epidemiology
-
-### Diabetes in Spain
-Spain has a significant diabetes burden affecting approximately 2.5-3 million patients (6-7% of adult population). Type 2 diabetes represents 85-90% of cases, while Type 1 diabetes affects 8-10% of the diabetic population.
-
-### Unmet Medical Needs
-- Suboptimal glycemic control: Only 30% of Type 2 patients achieve HbA1c targets
-- Hypoglycemic events: 1-2 severe events per patient-year in insulin users
-- Treatment burden: Multiple daily injections and fingerstick testing
-- Limited real-time feedback on glucose trends
-
-## Clinical Efficacy Data
-
-### Pivotal Study Design
-- **Population:** 20 patients (60% Type 1, 40% Type 2)
-- **Study Duration:** 14 days per patient
-- **Primary Endpoint:** MARD ≤10%
-- **Secondary Endpoints:** Hypoglycemia detection rate, safety
-
-### Efficacy Results
-- **Primary Endpoint Achieved:** MARD 9.4% [95% CI: 8.8-10.0%, p<0.001]
-- **Hypoglycemia Detection:** 94.2% sensitivity, 91.7% specificity
-- **Glucose Variability:** 28.5% reduction vs. conventional monitoring
-- **Sensor Performance:** 13.8-day mean lifespan (target: 14 days)
-
-## Safety & Tolerability
-
-### Adverse Events Summary
-- **Total Events:** 10 documented
-- **Serious Adverse Events:** 0
-- **Mild/Moderate Events:** 10 (skin irritation 2, hyperglycemia 2, calibration issues 3, hypoglycemia 2, device performance 1)
-- **Resolution Rate:** 100%
-
-### Safety Profile
-- Skin irritation managed with adhesive alternatives
-- Calibration drift addressed with system improvements
-- No serious device-related events
-- Excellent long-term safety (14-day observation)
-
-## Pharmacoeconomic Analysis
-
-### Spanish Healthcare Perspective
-- **Annual Cost-Effectiveness:** €2,400-3,200 per patient per year
-- **Cost per Quality-Adjusted Life Year (QALY):** €18,500 (vs. €30,000 conventional)
-- **Budget Impact (100,000 patients):** €45-60M annual investment
-- **Return on Investment:** Hypoglycemia reduction alone saves €8-12M annually
-
-### Payer Value Proposition
-- Reduces emergency department visits by 35%
-- Decreases hospitalization for hypoglycemic episodes by 42%
-- Improves HbA1c by 0.8-1.2% vs. conventional monitoring
-- Enables early intervention in hyperglycemic crises
-
-## Comparative Effectiveness
-
-### vs. Dexcom G6
-- Comparable MARD (9.4% vs. 9.0%)
-- Superior hypoglycemia detection (94.2% vs. 92%)
-- Integrated bolus calculator (Dexcom: requires separate app)
-- Cost: 15% lower in Spanish market
-
-### vs. Abbott Freestyle
-- Superior real-time glucose display (14-day CGM vs. 14-day FGM)
-- Integrated predictive alerts
-- Better patient satisfaction (4.2/5.0 vs. 3.8/5.0)
-
-## Regulatory Status
-
-### EU MDR Compliance
-- Device Classification: Class II (Medical Device Regulation 2017/745)
-- Conformity Assessment: Annex IX (Quality Management System)
-- Notified Body: Approved under EU MDR pathway
-- CE Mark Expected: Q1 2026
-
-### Spanish Market Approval
-- AEMPS Registration: Pending (submitted Q3 2025)
-- Spanish Reimbursement: ICS negotiation ongoing
-- Launch Timeline: Q2 2026 (post-CE marking)
-
-## Conclusion
-
-This Continuous Glucose Monitoring system with bolus calculator represents a significant advancement in diabetes care, offering superior efficacy, safety, and user experience compared to existing solutions. The clinical evidence base, combined with economic value and regulatory compliance, positions this device for successful market entry in Spain and the EU.
-
-**Recommended Actions:**
-1. Complete CE marking documentation
-2. Finalize Spanish reimbursement negotiations
-3. Prepare physician training program
-4. Establish patient support services"""
-
-    elif deliverable_type == "summary":
-        return f"""# Medical Summary Document: CGM System with Bolus Calculator
-
-## Clinical Overview
-Continuous Glucose Monitoring (CGM) system achieving 9.4% MARD with integrated bolus calculator for optimal insulin dosing. Designed for Type 1 and Type 2 diabetes management.
-
-## Key Efficacy Metrics
-- **MARD:** 9.4% (Primary endpoint: MARD ≤10%)
-- **Hypoglycemia Detection:** 94.2% sensitivity
-- **Safety Events:** 10 mild-moderate (0 serious)
-- **Patient Satisfaction:** 4.2/5.0
-
-## Clinical Value
-- 23.4% improvement in Time-in-Range vs. conventional monitoring
-- 35.2% reduction in nocturnal hypoglycemic events
-- Cost-effective: €18,500 per QALY vs. €30,000 conventional
-
-## Market Status
-- EU MDR Class II device
-- CE marking expected Q1 2026
-- Spanish AEMPS registration submitted
-- Launch planned Q2 2026
-
-## Contraindications & Warnings
-- Not recommended for patients with severe adhesive allergies
-- Requires minimum 2 fingerstick calibrations per 14-day wear cycle
-- Not approved for pediatric patients <4 years old (under clinical investigation)
-
-## References
-Based on pivotal study with 20 patients, 14-day observation period. Safety surveillance ongoing post-launch."""
-
-    else:
-        return f"Mock {deliverable_type} output for {brief.get('therapeutic_area')} in {market}. This is a simulated demonstration."
-
-
-@app.route("/user/<int:engagement_id>/generation/<int:generation_id>/refine", methods=["POST"])
-def user_refine_generation(engagement_id, generation_id):
-    """Refine generated output with user feedback and optional API improvement."""
-    db = get_db()
-
-    generation_run = db.query(GenerationRun).get(generation_id)
-    if not generation_run or generation_run.engagement_id != engagement_id:
-        db.close()
-        return "Generation not found", 404
-
-    refinement_prompt = request.form.get("refinement_prompt", "").strip()
-    use_api = request.form.get("use_api") == "on"
-    api_key = request.form.get("api_key", "").strip() if use_api else None
-
-    # Simulate refinement
-    refined_output = simulate_refinement(
-        generation_run.generated_output,
-        refinement_prompt,
-        use_api=use_api
-    )
-
-    # Log refinement
-    log_event(
+    create_brief_v1(
         db,
         engagement_id=engagement_id,
-        event_type="generation.refined",
-        actor_type="user",
-        actor_identity="expert",
-        payload={
-            "refinement_prompt": refinement_prompt[:200],
-            "used_api": use_api,
-        },
-        generation_run_id=generation_id,
+        deliverable_types=["gvd", "slide_deck", "summary"],
+        therapeutic_area="Diabetes — Continuous Glucose Monitoring (Class IIb device)",
+        target_markets=["Spain", "European Union"],
+        regulatory_frameworks=["MDR", "AEMPS"],
+        languages=["Spanish (Castellano)", "English"],
+        output_formats=["PDF", "DOCX"],
+        tone="Scientific",
+        target_audience="Endocrinologists, regional payers and notified body reviewers",
+        focus_area="Clinical performance, safety and market access",
+        key_messages=(
+            "MARD below 10% meets the primary accuracy endpoint. Superior nocturnal "
+            "hypoglycaemia detection. Integrated bolus calculator removes the need for a "
+            "separate dosing app. CE marking under MDR 2017/745 with Spanish market entry "
+            "through AEMPS."
+        ),
+        dossier_sections=[section["id"] for section in content.DOSSIER_SECTIONS],
+        regional_tender_spec=(
+            "Spanish CCAA tender criteria weight time-in-range improvement and nocturnal "
+            "hypoglycaemia reduction. Target launch Q2 2026."
+        ),
+        additional_requirements=(
+            "Focus on Spain market entry under MDR. Document the bolus calculator as an "
+            "IEC 62304 software component. Label all comparative statements as indirect."
+        ),
+    )
+    # create_brief_v1 writes its own brief.submitted event — no second one here.
+    return engagement_id
+
+
+def active_engagement_id(db) -> int:
+    """The engagement bound to this browser session, seeding the demo on first visit."""
+    engagement_id = session.get("engagement_id")
+    if engagement_id and db.get(Engagement, engagement_id):
+        return engagement_id
+
+    existing = (
+        db.query(Engagement)
+        .filter(Engagement.client_name == DEMO_CLIENT_NAME)
+        .order_by(Engagement.created_at.desc())
+        .first()
+    )
+    engagement_id = existing.id if existing else seed_demo_engagement(db)
+    session["engagement_id"] = engagement_id
+    return engagement_id
+
+
+def engagement_context(db) -> tuple[int, dict, dict]:
+    """(engagement_id, brief dict, dataset statistics) — the trio most pages need."""
+    engagement_id = active_engagement_id(db)
+    brief = get_latest_brief(db, engagement_id)
+    brief_data = brief_as_dict(brief) if brief else {}
+    return engagement_id, brief_data, dataset_stats(db, engagement_id)
+
+
+def dataset_stats(db, engagement_id: int) -> dict:
+    """Read every uploaded tabular file and derive the figures the drafts cite."""
+    files = db.query(UploadedFile).filter_by(engagement_id=engagement_id).all()
+    stats: dict = {"study": {}, "safety": {}, "efficacy": {}, "files": []}
+
+    for record in files:
+        path = os.path.join(UPLOAD_DIR, record.file_path)
+        entry = {
+            "id": record.id,
+            "filename": record.filename,
+            "category": record.category,
+            "size": record.file_size,
+            "checksum": record.sha256_checksum,
+            "uploaded_at": record.uploaded_at,
+            "rows": 0,
+            "columns": [],
+            "error": None,
+        }
+
+        if os.path.exists(path) and dataset.is_tabular(record.filename):
+            table = dataset.read_table(path)
+            entry["rows"] = table["row_count"]
+            entry["columns"] = table["columns"]
+            entry["error"] = table["error"]
+
+            columns = set(table["columns"])
+            if {"MARD", "Patient_ID"} & columns and "Event_Type" not in columns:
+                stats["study"] = dataset.summarise_study(table["rows"])
+            elif "Event_Type" in columns:
+                stats["safety"] = dataset.summarise_safety(table["rows"])
+            elif "Metric" in columns:
+                stats["efficacy"] = dataset.summarise_efficacy(table["rows"])
+        elif not os.path.exists(path):
+            entry["error"] = "File missing from storage"
+
+        stats["files"].append(entry)
+
+    return stats
+
+
+def file_size_label(num_bytes: int) -> str:
+    size = float(num_bytes or 0)
+    for unit in ("B", "KB", "MB", "GB"):
+        if size < 1024 or unit == "GB":
+            return f"{size:.0f} {unit}" if unit == "B" else f"{size:.1f} {unit}"
+        size /= 1024
+    return f"{size:.1f} GB"
+
+
+def markdown_to_html(text: str) -> str:
+    """Minimal Markdown renderer — enough for the drafts this app produces."""
+    from markupsafe import escape
+
+    html_lines: list[str] = []
+    in_list = False
+
+    def close_list():
+        nonlocal in_list
+        if in_list:
+            html_lines.append("</ul>")
+            in_list = False
+
+    for raw in (text or "").split("\n"):
+        line = raw.rstrip()
+        stripped = line.strip()
+
+        if not stripped:
+            close_list()
+            continue
+        if stripped.startswith("---"):
+            close_list()
+            html_lines.append("<hr>")
+            continue
+
+        safe = str(escape(stripped))
+        # inline emphasis + code
+        while "**" in safe:
+            safe = safe.replace("**", "<strong>", 1).replace("**", "</strong>", 1)
+        while safe.count("`") >= 2:
+            safe = safe.replace("`", "<code>", 1).replace("`", "</code>", 1)
+
+        if stripped.startswith("#"):
+            close_list()
+            level = min(len(stripped) - len(stripped.lstrip("#")), 4)
+            html_lines.append(f"<h{level}>{safe.lstrip('#').strip()}</h{level}>")
+        elif stripped.startswith(("- ", "* ")):
+            if not in_list:
+                html_lines.append("<ul>")
+                in_list = True
+            html_lines.append(f"<li>{safe[2:]}</li>")
+        elif stripped.startswith("> "):
+            close_list()
+            html_lines.append(f'<p class="text-muted"><em>{safe[2:]}</em></p>')
+        else:
+            close_list()
+            html_lines.append(f"<p>{safe}</p>")
+
+    close_list()
+    return "\n".join(html_lines)
+
+
+@app.context_processor
+def inject_globals():
+    return {
+        "nav_items": NAV_ITEMS,
+        "current_role": current_role(),
+        "current_role_label": content.ROLE_LABELS.get(current_role(), "Administrator"),
+        "can": can,
+        "file_size_label": file_size_label,
+    }
+
+
+app.jinja_env.filters["markdown"] = markdown_to_html
+
+
+# --------------------------------------------------------------------------
+# Dashboard
+# --------------------------------------------------------------------------
+
+
+@app.route("/")
+def dashboard():
+    db = get_db()
+    try:
+        engagement_id, brief, stats = engagement_context(db)
+        engagement = db.get(Engagement, engagement_id)
+
+        runs = (
+            db.query(GenerationRun)
+            .filter_by(engagement_id=engagement_id)
+            .order_by(GenerationRun.created_at.desc())
+            .all()
+        )
+        events = (
+            db.query(AuditEvent)
+            .filter_by(engagement_id=engagement_id)
+            .order_by(AuditEvent.created_at.desc())
+            .limit(6)
+            .all()
+        )
+
+        dossier_runs = [run for run in runs if run.deliverable_type == "gvd"]
+        completed_sections = {run.resolved_prompt.split("::")[0] for run in dossier_runs}
+
+        checklist = {
+            "classification": bool(brief.get("therapeutic_area")),
+            "upload": bool(stats["files"]),
+            "regulations": bool(brief.get("regulatory_frameworks")),
+            "dossier": len(dossier_runs) > 0,
+            "msl": any(run.deliverable_type != "gvd" for run in runs),
+        }
+
+        activity = [{
+            "title": event.event_type.replace(".", " · ").replace("_", " ").title(),
+            "actor": event.actor_identity,
+            "date": event.created_at,
+            "status": "Completed",
+        } for event in events]
+
+        return render_template(
+            "dashboard.html",
+            engagement=engagement.client_name,
+            brief=brief,
+            stats=stats,
+            documents_generated=len(runs),
+            sections_done=len(completed_sections),
+            total_sections=len(content.DOSSIER_SECTIONS),
+            checklist=checklist,
+            onboarding_steps=content.ONBOARDING_STEPS,
+            activity=activity,
+            regulatory_track=session.get("regulatory_track", "global"),
+        )
+    finally:
+        db.close()
+
+
+@app.route("/regulatory-track", methods=["POST"])
+def regulatory_track():
+    session["regulatory_track"] = request.form.get("track", "global")
+    return redirect(url_for("dashboard"))
+
+
+@app.route("/switch-role", methods=["POST"])
+def switch_role():
+    order = [role["id"] for role in content.DEFAULT_ROLES]
+    index = order.index(current_role()) if current_role() in order else 0
+    session["role"] = order[(index + 1) % len(order)]
+    return redirect(request.form.get("next") or url_for("dashboard"))
+
+
+@app.route("/demo/reset", methods=["POST"])
+def reset_demo():
+    """Rebuild the demo engagement from the sample data, discarding generated work."""
+    db = get_db()
+    try:
+        engagement_id = session.get("engagement_id")
+        if engagement_id:
+            engagement = db.get(Engagement, engagement_id)
+            if engagement:
+                db.delete(engagement)
+                db.commit()
+        session.pop("engagement_id", None)
+        session.pop("wizard", None)
+        session["engagement_id"] = seed_demo_engagement(db)
+        flash("Demo reset — sample CGM dataset and brief reloaded.", "success")
+        return redirect(url_for("dashboard"))
+    finally:
+        db.close()
+
+
+# --------------------------------------------------------------------------
+# Upload
+# --------------------------------------------------------------------------
+
+
+@app.route("/upload", methods=["GET", "POST"])
+def upload():
+    db = get_db()
+    try:
+        engagement_id, brief, stats = engagement_context(db)
+
+        if request.method == "POST":
+            if not can("upload_data"):
+                flash(f"{content.ROLE_LABELS[current_role()]} cannot upload clinical data.", "error")
+                return redirect(url_for("upload"))
+
+            uploads = request.files.getlist("files")
+            accepted, rejected = 0, []
+
+            for upload_file in uploads:
+                if not upload_file or not upload_file.filename:
+                    continue
+                original = upload_file.filename
+                if not dataset.is_allowed(original):
+                    rejected.append(f"{original} (unsupported type)")
+                    continue
+
+                safe_name = secure_filename(original)
+                stored_name = f"{engagement_id}_{int(datetime.utcnow().timestamp())}_{safe_name}"
+                destination = os.path.join(UPLOAD_DIR, stored_name)
+                upload_file.save(destination)
+
+                table = dataset.read_table(destination) if dataset.is_tabular(original) else {"columns": []}
+                record = UploadedFile(
+                    engagement_id=engagement_id,
+                    filename=original,
+                    file_path=stored_name,
+                    file_size=os.path.getsize(destination),
+                    sha256_checksum=dataset.checksum(destination),
+                    category=request.form.get("category")
+                             or dataset.classify(original, table.get("columns", [])),
+                    uploaded_by=current_role(),
+                )
+                db.add(record)
+                db.commit()
+                log_event(db, engagement_id, "data.uploaded", "client", current_role(),
+                          {"filename": original, "category": record.category,
+                           "checksum": record.sha256_checksum, "bytes": record.file_size},
+                          uploaded_file_id=record.id)
+                accepted += 1
+
+            if accepted:
+                flash(f"{accepted} file(s) uploaded and checksummed.", "success")
+            for note in rejected:
+                flash(f"Rejected {note}", "error")
+            return redirect(url_for("upload"))
+
+        return render_template("upload.html", brief=brief, stats=stats)
+    finally:
+        db.close()
+
+
+@app.route("/upload/<int:file_id>/delete", methods=["POST"])
+def delete_upload(file_id):
+    db = get_db()
+    try:
+        engagement_id = active_engagement_id(db)
+        record = db.get(UploadedFile, file_id)
+        if record and record.engagement_id == engagement_id:
+            if not can("upload_data"):
+                flash("Your role cannot remove uploaded data.", "error")
+                return redirect(url_for("upload"))
+            path = os.path.join(UPLOAD_DIR, record.file_path)
+            if os.path.exists(path):
+                os.remove(path)
+            log_event(db, engagement_id, "data.removed", "client", current_role(),
+                      {"filename": record.filename})
+            db.delete(record)
+            db.commit()
+            flash(f"Removed {record.filename}.", "success")
+        return redirect(url_for("upload"))
+    finally:
+        db.close()
+
+
+# --------------------------------------------------------------------------
+# Regulations / policy news / resources
+# --------------------------------------------------------------------------
+
+
+@app.route("/regulations", methods=["GET", "POST"])
+def regulations():
+    db = get_db()
+    try:
+        engagement_id, brief, _ = engagement_context(db)
+
+        if request.method == "POST":
+            selected = request.form.getlist("regulations")
+            latest = get_latest_brief(db, engagement_id)
+            if latest:
+                latest.regulatory_frameworks = [
+                    content.REGULATION_BY_ID[key]["id"].upper()
+                    for key in selected if key in content.REGULATION_BY_ID
+                ] or ["MDR"]
+                db.commit()
+                log_event(db, engagement_id, "brief.revised", "user", current_role(),
+                          {"field": "regulatory_frameworks", "new": latest.regulatory_frameworks},
+                          brief_version_id=latest.id)
+            flash(f"{len(selected)} regulatory framework(s) saved to the brief.", "success")
+            return redirect(url_for("regulations"))
+
+        selected_ids = {value.lower() for value in (brief.get("regulatory_frameworks") or [])}
+        grouped: dict[str, list] = {}
+        for regulation in content.REGULATIONS:
+            grouped.setdefault(regulation["region"], []).append(regulation)
+
+        return render_template(
+            "regulations.html",
+            grouped=grouped,
+            selected_ids=selected_ids,
+            selected_count=len(selected_ids),
+        )
+    finally:
+        db.close()
+
+
+@app.route("/policy-news")
+def policy_news():
+    category = request.args.get("category", "All")
+    items = content.POLICY_NEWS
+    if category != "All":
+        items = [item for item in items if item["category"] == category]
+    return render_template(
+        "policy_news.html",
+        items=items,
+        categories=content.NEWS_CATEGORIES,
+        selected_category=category,
     )
 
-    # Create a new version of the generation with refined output
-    generation_run.generated_output = refined_output
-    generation_run.status = "refined"
-    db.commit()
 
-    db.close()
-    return redirect(url_for("user_prompt", engagement_id=engagement_id))
-
-
-def simulate_refinement(original_output, refinement_prompt, use_api=False):
-    """Simulate output refinement (in Phase 2, this will call actual LLM)."""
-    improvement = "\n\n---\n\n## Refinement Applied\n"
-    improvement += f"**User Feedback:** {refinement_prompt[:100]}...\n\n"
-
-    if use_api:
-        improvement += "**Enhancement Level:** Full API refinement (would use Claude/GPT-4/Gemini in Phase 2)\n"
-    else:
-        improvement += "**Enhancement Level:** Offline simulation mode\n"
-
-    improvement += "In Phase 2, the refined output will be regenerated through the selected LLM provider based on your feedback."
-
-    return original_output + improvement
+@app.route("/resources")
+def resources():
+    resource_type = request.args.get("type", "All")
+    items = content.RESOURCES
+    if resource_type != "All":
+        items = [item for item in items if item["type"] == resource_type]
+    return render_template(
+        "resources.html",
+        items=items,
+        types=content.RESOURCE_TYPES,
+        selected_type=resource_type,
+    )
 
 
-# ============================================================================
-# Error Handlers
-# ============================================================================
+# --------------------------------------------------------------------------
+# Global Value Dossier
+# --------------------------------------------------------------------------
+
+
+@app.route("/global-dossier")
+def global_dossier():
+    db = get_db()
+    try:
+        engagement_id, brief, stats = engagement_context(db)
+
+        runs = (
+            db.query(GenerationRun)
+            .filter_by(engagement_id=engagement_id, deliverable_type="gvd")
+            .order_by(GenerationRun.created_at.asc())
+            .all()
+        )
+        generated = {run.resolved_prompt.split("::")[0]: {
+            "id": run.id, "provider": run.provider, "model": run.model,
+            "offline": run.provider == "offline",
+        } for run in runs}
+
+        return render_template(
+            "global_dossier.html",
+            brief=brief,
+            stats=stats,
+            sections=content.DOSSIER_SECTIONS,
+            generated=generated,
+            providers=llm.PROVIDERS,
+            markets=content.MARKETS,
+            languages=content.LANGUAGES,
+            completed_count=len(generated),
+        )
+    finally:
+        db.close()
+
+
+@app.route("/api/dossier/section", methods=["POST"])
+def api_generate_section():
+    """Generate one dossier section — drives the progressive UI on the dossier page."""
+    payload = request.get_json(silent=True) or {}
+    section_id = payload.get("section_id", "")
+    if section_id not in content.SECTION_BY_ID:
+        return jsonify({"error": "Unknown section"}), 400
+
+    if not can("edit_documents"):
+        return jsonify({"error": f"{content.ROLE_LABELS[current_role()]} cannot generate documents."}), 403
+
+    db = get_db()
+    try:
+        engagement_id, brief, stats = engagement_context(db)
+        latest_brief = get_latest_brief(db, engagement_id)
+
+        overlay = (payload.get("overlay") or "").strip()
+        provider = payload.get("provider", "offline")
+        model = payload.get("model") or llm.PROVIDERS.get(provider, {}).get("models", ["offline"])[0]
+        api_key = payload.get("api_key") or ""
+
+        prompt = content.build_section_prompt(section_id, brief, stats, overlay)
+        offline_draft = content.draft_section(section_id, brief, stats, overlay)
+        result = llm.generate(prompt, offline_draft, provider, model, api_key)
+
+        existing = (
+            db.query(GenerationRun)
+            .filter_by(engagement_id=engagement_id, deliverable_type="gvd")
+            .filter(GenerationRun.resolved_prompt.like(f"{section_id}::%"))
+            .first()
+        )
+        round_number = (existing.round_number + 1) if existing else 1
+
+        run = GenerationRun(
+            engagement_id=engagement_id,
+            brief_version_id=latest_brief.id,
+            round_number=round_number,
+            deliverable_type="gvd",
+            resolved_prompt=f"{section_id}::{prompt}",
+            prompt_provenance={"client": "layer-1", "template": "layer-2",
+                               "expert": "layer-3" if overlay else None},
+            provider=result.provider,
+            model=result.model,
+            generated_output=result.text,
+            status="completed",
+            completed_at=datetime.utcnow(),
+            created_by=current_role(),
+        )
+        if existing:
+            db.delete(existing)
+        db.add(run)
+        db.commit()
+
+        log_event(db, engagement_id, "generation.completed", "user", current_role(),
+                  {"deliverable": "gvd", "section": section_id, "provider": result.provider,
+                   "model": result.model, "offline": result.offline,
+                   "expert_overlay": bool(overlay)},
+                  generation_run_id=run.id)
+
+        return jsonify({
+            "section_id": section_id,
+            "run_id": run.id,
+            "provider": result.provider,
+            "model": result.model,
+            "offline": result.offline,
+            "note": result.note,
+            "html": markdown_to_html(result.text),
+        })
+    finally:
+        db.close()
+
+
+@app.route("/global-dossier/section/<section_id>")
+def dossier_section(section_id):
+    """Full read/refine view for one generated section."""
+    db = get_db()
+    try:
+        engagement_id, brief, _ = engagement_context(db)
+        run = (
+            db.query(GenerationRun)
+            .filter_by(engagement_id=engagement_id, deliverable_type="gvd")
+            .filter(GenerationRun.resolved_prompt.like(f"{section_id}::%"))
+            .first()
+        )
+        if not run:
+            flash("That section has not been generated yet.", "error")
+            return redirect(url_for("global_dossier"))
+
+        return render_template(
+            "generation_result.html",
+            title=content.SECTION_BY_ID[section_id]["title"],
+            subtitle="Global Value Dossier section",
+            run={"id": run.id, "provider": run.provider, "model": run.model,
+                 "round": run.round_number, "created_at": run.created_at,
+                 "output": run.generated_output,
+                 "prompt": run.resolved_prompt.split("::", 1)[-1]},
+            back_url=url_for("global_dossier"),
+            brief=brief,
+        )
+    finally:
+        db.close()
+
+
+@app.route("/generation/<int:run_id>/refine", methods=["POST"])
+def refine_generation(run_id):
+    db = get_db()
+    try:
+        engagement_id = active_engagement_id(db)
+        run = db.get(GenerationRun, run_id)
+        if not run or run.engagement_id != engagement_id:
+            flash("Generation not found.", "error")
+            return redirect(url_for("documents"))
+
+        if not can("edit_documents"):
+            flash(f"{content.ROLE_LABELS[current_role()]} cannot edit documents.", "error")
+            return redirect(request.referrer or url_for("documents"))
+
+        instruction = (request.form.get("instruction") or "").strip()
+        if not instruction:
+            flash("Describe what to change before refining.", "error")
+            return redirect(request.referrer or url_for("documents"))
+
+        provider = request.form.get("provider", "offline")
+        model = request.form.get("model") or llm.PROVIDERS.get(provider, {}).get("models", ["offline"])[0]
+        api_key = request.form.get("api_key", "")
+
+        prompt = (
+            f"{run.resolved_prompt.split('::', 1)[-1]}\n\n"
+            "# Layer 3 — Expert revision instruction\n"
+            f"{instruction}\n\n"
+            "Rewrite the section applying this instruction. Keep every factual claim traceable "
+            "to the dataset summary above.\n\n"
+            "# Current draft\n"
+            f"{run.generated_output}"
+        )
+        result = llm.generate(prompt, content.refine(run.generated_output, instruction),
+                              provider, model, api_key)
+
+        run.generated_output = result.text
+        run.provider = result.provider
+        run.model = result.model
+        run.round_number += 1
+        run.completed_at = datetime.utcnow()
+        db.commit()
+
+        log_event(db, engagement_id, "generation.refined", "user", current_role(),
+                  {"instruction": instruction[:200], "provider": result.provider,
+                   "offline": result.offline, "round": run.round_number},
+                  generation_run_id=run.id)
+
+        flash(result.note or f"Refined — now at round {run.round_number}.",
+              "error" if result.note else "success")
+        return redirect(request.referrer or url_for("documents"))
+    finally:
+        db.close()
+
+
+# --------------------------------------------------------------------------
+# MSL materials
+# --------------------------------------------------------------------------
+
+
+@app.route("/msl-material", methods=["GET", "POST"])
+def msl_material():
+    db = get_db()
+    try:
+        engagement_id, brief, stats = engagement_context(db)
+        generated_run = None
+
+        if request.method == "POST":
+            if not can("edit_documents"):
+                flash(f"{content.ROLE_LABELS[current_role()]} cannot generate materials.", "error")
+                return redirect(url_for("msl_material"))
+
+            material_id = request.form.get("material_type", "")
+            if material_id not in content.MSL_MATERIAL_BY_ID:
+                flash("Choose a material type first.", "error")
+                return redirect(url_for("msl_material"))
+
+            config = {
+                "audience": request.form.get("audience", ""),
+                "focus_area": request.form.get("focus_area", ""),
+                "tone": request.form.get("tone", "scientific"),
+                "key_messages": request.form.get("key_messages", ""),
+            }
+            provider = request.form.get("provider", "offline")
+            model = request.form.get("model") or llm.PROVIDERS.get(provider, {}).get("models", ["offline"])[0]
+            api_key = request.form.get("api_key", "")
+
+            offline_draft = content.draft_msl_material(material_id, brief, stats, config)
+            prompt = (
+                f"Produce a {content.MSL_MATERIAL_BY_ID[material_id]['name']} for "
+                f"{dict(content.AUDIENCES).get(config['audience'], 'healthcare professionals')}, "
+                f"focused on {dict(content.FOCUS_AREAS).get(config['focus_area'], 'clinical performance')}, "
+                f"in a {config['tone']} tone.\n\n"
+                f"{content.build_section_prompt('clinical-efficacy', brief, stats, config['key_messages'])}"
+            )
+            result = llm.generate(prompt, offline_draft, provider, model, api_key)
+
+            latest_brief = get_latest_brief(db, engagement_id)
+            run = GenerationRun(
+                engagement_id=engagement_id,
+                brief_version_id=latest_brief.id,
+                round_number=1,
+                deliverable_type=material_id,
+                resolved_prompt=f"{material_id}::{prompt}",
+                prompt_provenance={"client": "layer-1", "template": "layer-2",
+                                   "expert": "layer-3" if config["key_messages"] else None},
+                provider=result.provider,
+                model=result.model,
+                generated_output=result.text,
+                status="completed",
+                completed_at=datetime.utcnow(),
+                created_by=current_role(),
+            )
+            db.add(run)
+            db.commit()
+
+            log_event(db, engagement_id, "generation.completed", "user", current_role(),
+                      {"deliverable": material_id, "provider": result.provider,
+                       "model": result.model, "offline": result.offline, **config},
+                      generation_run_id=run.id)
+
+            if result.note:
+                flash(result.note, "error")
+
+            generated_run = {
+                "id": run.id, "provider": run.provider, "model": run.model,
+                "output": run.generated_output, "material": content.MSL_MATERIAL_BY_ID[material_id],
+                "config": config,
+            }
+
+        return render_template(
+            "msl_material.html",
+            brief=brief,
+            stats=stats,
+            materials=content.MSL_MATERIALS,
+            audiences=content.AUDIENCES,
+            focus_areas=content.FOCUS_AREAS,
+            tones=content.TONES,
+            providers=llm.PROVIDERS,
+            generated=generated_run,
+        )
+    finally:
+        db.close()
+
+
+# --------------------------------------------------------------------------
+# Bolus calculator
+# --------------------------------------------------------------------------
+
+
+@app.route("/bolus-calculator", methods=["GET", "POST"])
+def bolus_calculator():
+    result = None
+    defaults = {"carbs_g": 60, "current_glucose": 180, "target_glucose": 110,
+                "icr": 12, "isf": 45, "insulin_on_board": 0, "trend": "steady"}
+
+    if request.method == "POST":
+        def number(field, fallback):
+            try:
+                return float(request.form.get(field, fallback))
+            except (TypeError, ValueError):
+                return float(fallback)
+
+        defaults = {
+            "carbs_g": number("carbs_g", 60),
+            "current_glucose": number("current_glucose", 180),
+            "target_glucose": number("target_glucose", 110),
+            "icr": number("icr", 12),
+            "isf": number("isf", 45),
+            "insulin_on_board": number("insulin_on_board", 0),
+            "trend": request.form.get("trend", "steady"),
+        }
+        result = content.calculate_bolus(**defaults)
+
+    return render_template(
+        "bolus_calculator.html",
+        result=result,
+        values=defaults,
+        trends=content.GLUCOSE_TRENDS,
+    )
+
+
+# --------------------------------------------------------------------------
+# Document library
+# --------------------------------------------------------------------------
+
+
+@app.route("/documents")
+def documents():
+    db = get_db()
+    try:
+        engagement_id, brief, _ = engagement_context(db)
+        runs = (
+            db.query(GenerationRun)
+            .filter_by(engagement_id=engagement_id)
+            .order_by(GenerationRun.created_at.desc())
+            .all()
+        )
+
+        type_filter = request.args.get("type", "All Types")
+        market_filter = request.args.get("market", "All Markets")
+        language_filter = request.args.get("language", "All Languages")
+
+        markets = brief.get("target_markets") or ["Spain"]
+        languages = brief.get("languages") or ["English"]
+
+        items = []
+        for run in runs:
+            key = run.resolved_prompt.split("::")[0]
+            if run.deliverable_type == "gvd":
+                doc_type = "Global Value Dossier"
+                title = f"GVD — {content.SECTION_BY_ID.get(key, {}).get('title', key)}"
+            else:
+                doc_type = "MSL Material"
+                title = content.MSL_MATERIAL_BY_ID.get(run.deliverable_type, {}).get(
+                    "name", run.deliverable_type)
+            items.append({
+                "id": run.id,
+                "title": title,
+                "type": doc_type,
+                "market": markets[0],
+                "language": languages[0],
+                "date": run.created_at,
+                "size": file_size_label(len((run.generated_output or "").encode("utf-8"))),
+                "status": "Final" if run.round_number > 1 else "Draft",
+                "provider": run.provider,
+                "model": run.model,
+                "round": run.round_number,
+            })
+
+        doc_types = ["All Types"] + sorted({item["type"] for item in items})
+        market_options = ["All Markets"] + markets
+        language_options = ["All Languages"] + languages
+
+        filtered = [
+            item for item in items
+            if (type_filter in ("All Types", item["type"]))
+            and (market_filter in ("All Markets", item["market"]))
+            and (language_filter in ("All Languages", item["language"]))
+        ]
+
+        return render_template(
+            "documents.html",
+            items=filtered,
+            total=len(items),
+            doc_types=doc_types,
+            markets=market_options,
+            languages=language_options,
+            selected={"type": type_filter, "market": market_filter, "language": language_filter},
+        )
+    finally:
+        db.close()
+
+
+@app.route("/documents/<int:run_id>")
+def document_detail(run_id):
+    db = get_db()
+    try:
+        engagement_id, brief, _ = engagement_context(db)
+        run = db.get(GenerationRun, run_id)
+        if not run or run.engagement_id != engagement_id:
+            flash("Document not found.", "error")
+            return redirect(url_for("documents"))
+
+        key = run.resolved_prompt.split("::")[0]
+        title = (content.SECTION_BY_ID.get(key, {}).get("title")
+                 or content.MSL_MATERIAL_BY_ID.get(run.deliverable_type, {}).get("name")
+                 or run.deliverable_type)
+
+        return render_template(
+            "generation_result.html",
+            title=title,
+            subtitle="Global Value Dossier section" if run.deliverable_type == "gvd" else "MSL material",
+            run={"id": run.id, "provider": run.provider, "model": run.model,
+                 "round": run.round_number, "created_at": run.created_at,
+                 "output": run.generated_output,
+                 "prompt": run.resolved_prompt.split("::", 1)[-1]},
+            back_url=url_for("documents"),
+            brief=brief,
+        )
+    finally:
+        db.close()
+
+
+@app.route("/documents/<int:run_id>/download")
+def download_document(run_id):
+    db = get_db()
+    try:
+        engagement_id = active_engagement_id(db)
+        run = db.get(GenerationRun, run_id)
+        if not run or run.engagement_id != engagement_id:
+            flash("Document not found.", "error")
+            return redirect(url_for("documents"))
+        if not can("export_documents"):
+            flash(f"{content.ROLE_LABELS[current_role()]} cannot export documents.", "error")
+            return redirect(url_for("documents"))
+
+        key = run.resolved_prompt.split("::")[0]
+        filename = f"approved_{run.deliverable_type}_{key}_r{run.round_number}.md"
+        path = os.path.join(STORAGE_DIR, secure_filename(filename))
+        with open(path, "w", encoding="utf-8") as handle:
+            handle.write(run.generated_output or "")
+
+        log_event(db, engagement_id, "document.exported", "user", current_role(),
+                  {"filename": filename}, generation_run_id=run.id)
+        return send_file(path, as_attachment=True, download_name=filename)
+    finally:
+        db.close()
+
+
+# --------------------------------------------------------------------------
+# Submission wizard
+# --------------------------------------------------------------------------
+
+WIZARD_STEPS = [
+    {"number": 1, "name": "Upload Data", "description": "Pivotal clinical data"},
+    {"number": 2, "name": "Select Markets", "description": "GVD target markets"},
+    {"number": 3, "name": "Select Languages", "description": "Content languages"},
+    {"number": 4, "name": "AI Instructions", "description": "Generation parameters"},
+    {"number": 5, "name": "Review & Submit", "description": "Final review"},
+]
+
+
+@app.route("/submission", methods=["GET", "POST"])
+def submission():
+    db = get_db()
+    try:
+        engagement_id, brief, stats = engagement_context(db)
+        wizard = session.get("wizard") or {
+            "step": 1, "markets": [market["id"] for market in content.MARKETS if market.get("default")],
+            "languages": [lang["code"] for lang in content.LANGUAGES if lang.get("default")],
+            "database": "", "methodology": "", "special_requirements": "",
+        }
+
+        if request.method == "POST":
+            action = request.form.get("action", "next")
+            step = int(request.form.get("step", 1))
+
+            if step == 2:
+                wizard["markets"] = request.form.getlist("markets")
+            elif step == 3:
+                wizard["languages"] = request.form.getlist("languages")
+            elif step == 4:
+                wizard["database"] = request.form.get("database", "")
+                wizard["methodology"] = request.form.get("methodology", "")
+                wizard["special_requirements"] = request.form.get("special_requirements", "")
+
+            if action == "submit":
+                latest = get_latest_brief(db, engagement_id)
+                if latest:
+                    latest.target_markets = [
+                        market["name"] for market in content.MARKETS
+                        if market["id"] in wizard["markets"]
+                    ] or latest.target_markets
+                    latest.languages = [
+                        lang["name"] for lang in content.LANGUAGES
+                        if lang["code"] in wizard["languages"]
+                    ] or latest.languages
+                    if wizard["special_requirements"]:
+                        latest.additional_requirements = wizard["special_requirements"]
+                    db.commit()
+
+                log_event(db, engagement_id, "submission.queued", "user", current_role(),
+                          {"markets": wizard["markets"], "languages": wizard["languages"],
+                           "database": wizard["database"], "methodology": wizard["methodology"]})
+                session["wizard"] = {**wizard, "step": 5}
+                flash("Submission queued. Generate the dossier sections to produce the documents.",
+                      "success")
+                return redirect(url_for("global_dossier"))
+
+            wizard["step"] = max(1, min(len(WIZARD_STEPS),
+                                        step + (1 if action == "next" else -1)))
+            session["wizard"] = wizard
+            return redirect(url_for("submission"))
+
+        session["wizard"] = wizard
+        return render_template(
+            "submission.html",
+            steps=WIZARD_STEPS,
+            wizard=wizard,
+            stats=stats,
+            brief=brief,
+            markets=content.MARKETS,
+            languages=content.LANGUAGES,
+            databases=content.LITERATURE_DATABASES,
+            methodologies=content.METHODOLOGIES,
+        )
+    finally:
+        db.close()
+
+
+# --------------------------------------------------------------------------
+# Settings & audit
+# --------------------------------------------------------------------------
+
+
+@app.route("/settings", methods=["GET", "POST"])
+def settings():
+    roles = session.get("roles") or [
+        {**role, "permissions": dict(role["permissions"])} for role in content.DEFAULT_ROLES
+    ]
+
+    if request.method == "POST":
+        role_id = request.form.get("role_id")
+        permission = request.form.get("permission")
+        for role in roles:
+            if role["id"] == role_id and role_id != "admin" and permission in role["permissions"]:
+                role["permissions"][permission] = not role["permissions"][permission]
+        session["roles"] = roles
+        return redirect(url_for("settings"))
+
+    session["roles"] = roles
+    return render_template(
+        "settings.html",
+        roles=roles,
+        permission_labels=content.PERMISSION_LABELS,
+        providers=llm.PROVIDERS,
+        env_keys={name: bool(os.getenv(env)) for name, env in llm.ENV_KEYS.items()},
+    )
+
+
+@app.route("/audit")
+def audit_trail():
+    db = get_db()
+    try:
+        engagement_id, brief, _ = engagement_context(db)
+        events = get_engagement_trail(db, engagement_id)
+        rows = [{
+            "id": event.id,
+            "type": event.event_type,
+            "actor": f"{event.actor_identity} ({event.actor_type})",
+            "created_at": event.created_at,
+            "payload": json.dumps(event.payload or {}, indent=2, default=str),
+        } for event in reversed(events)]
+        return render_template("audit.html", events=rows, brief=brief)
+    finally:
+        db.close()
+
+
+# --------------------------------------------------------------------------
+# Errors
+# --------------------------------------------------------------------------
 
 
 @app.errorhandler(404)
 def not_found(error):
-    return render_template("404.html"), 404
+    return render_template("error.html", code=404,
+                           message="That page does not exist."), 404
 
 
 @app.errorhandler(500)
 def server_error(error):
-    return render_template("500.html", error=str(error)), 500
+    return render_template("error.html", code=500,
+                           message="Something went wrong on the server."), 500
 
 
-# ============================================================================
-# Launch
-# ============================================================================
+@app.errorhandler(413)
+def too_large(error):
+    flash("That file exceeds the 100 MB per-file limit.", "error")
+    return redirect(url_for("upload")), 302
 
 
-def open_browser(port=5001):
-    """Open the browser after a short delay."""
+# --------------------------------------------------------------------------
+# Entry point
+# --------------------------------------------------------------------------
+
+
+def open_browser(port: int):
+    import webbrowser
     webbrowser.open(f"http://localhost:{port}")
 
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 5001))
 
-    # Open browser after 1 second
-    timer = Timer(1.0, lambda: open_browser(port))
-    timer.daemon = True
-    timer.start()
+    if os.getenv("OPEN_BROWSER", "1") == "1":
+        timer = Timer(1.2, open_browser, args=(port,))
+        timer.daemon = True
+        timer.start()
 
-    print("\n" + "=" * 60)
-    print("APProved — Python Prototype")
-    print("=" * 60)
-    print(f"Server running at http://localhost:{port}")
-    print("Press Ctrl+C to stop\n")
+    live = [name for name, env in llm.ENV_KEYS.items() if os.getenv(env)]
+
+    print("\n" + "=" * 64)
+    print("  APProved — Medical Writing Platform (prototype)")
+    print("=" * 64)
+    print(f"  URL      : http://localhost:{port}")
+    print(f"  Demo     : CGM pivotal study · EU MDR · Spain launch")
+    print(f"  LLM mode : {'live keys detected for ' + ', '.join(live) if live else 'offline (no API key needed)'}")
+    print("  Stop     : Ctrl+C")
+    print("=" * 64 + "\n")
 
     app.run(host="127.0.0.1", port=port, debug=True, use_reloader=False)

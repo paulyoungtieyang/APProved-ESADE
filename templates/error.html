@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% import "_icons.html" as icons %}
+{% block title %}Error {{ code }}{% endblock %}
+
+{% block content %}
+<div class="page page--sm">
+    <div class="card">
+        <div class="empty-state">
+            {{ icons.icon("alert-circle", 48) }}
+            <h3>{{ code }} — {{ message }}</h3>
+            <p>Head back to the dashboard and try again.</p>
+            <a href="{{ url_for('dashboard') }}" class="btn btn--primary mt-6">Back to Dashboard</a>
+        </div>
+    </div>
+</div>
+{% endblock %}

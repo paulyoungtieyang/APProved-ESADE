@@ -1,0 +1,241 @@
+{% extends "base.html" %}
+{% import "_icons.html" as icons %}
+{% block title %}Submission{% endblock %}
+
+{% block content %}
+<div class="page page--md">
+    <div class="page-header">
+        <h1>Submission Workflow</h1>
+        <p>Complete each step to configure and queue document generation.</p>
+    </div>
+
+    {# --------------------------------------------------------------- Stepper #}
+    <div class="card mb-6">
+        <div class="card__body">
+            <div class="stepper">
+                {% for step in steps %}
+                    <div class="stepper__step
+                        {% if step.number < wizard.step %}is-done{% elif step.number == wizard.step %}is-current{% endif %}">
+                        <div class="stepper__node">
+                            <div class="stepper__circle">
+                                {% if step.number < wizard.step %}{{ icons.icon("check", 20) }}
+                                {% else %}{{ step.number }}{% endif %}
+                            </div>
+                            <div class="stepper__name">{{ step.name }}</div>
+                            <div class="stepper__desc">{{ step.description }}</div>
+                        </div>
+                        {% if not loop.last %}<div class="stepper__line"></div>{% endif %}
+                    </div>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+
+    <form method="POST">
+        <input type="hidden" name="step" value="{{ wizard.step }}">
+
+        <div class="card mb-6" style="min-height:22rem">
+            <div class="card__body">
+
+                {# ------------------------------------------------------ Step 1 #}
+                {% if wizard.step == 1 %}
+                    <h2 class="section-title">Pivotal Clinical Data</h2>
+                    <p class="text-muted mb-6">These files are the evidence base for every generated document.</p>
+
+                    {% for file in stats.files %}
+                        <div class="file-row">
+                            <div class="file-row__main">
+                                <span style="color:var(--slate-500);display:flex">{{ icons.icon("file", 20) }}</span>
+                                <div class="flex-1">
+                                    <p class="file-row__name">{{ file.filename }}</p>
+                                    <p class="file-row__meta">
+                                        {{ file_size_label(file.size) }}
+                                        {% if file.rows %} · {{ file.rows }} rows{% endif %}
+                                        · {{ file.category }}
+                                    </p>
+                                </div>
+                            </div>
+                            <span class="row text-xs" style="color:var(--green-600);gap:.25rem">
+                                {{ icons.icon("check-circle", 16) }} Verified
+                            </span>
+                        </div>
+                    {% else %}
+                        <div class="empty-state">
+                            {{ icons.icon("upload", 48) }}
+                            <h3>No data uploaded</h3>
+                            <p>Add clinical data before continuing.</p>
+                        </div>
+                    {% endfor %}
+
+                    <a href="{{ url_for('upload') }}" class="btn btn--outline mt-6">
+                        {{ icons.icon("upload", 16) }} Manage uploads
+                    </a>
+
+                {# ------------------------------------------------------ Step 2 #}
+                {% elif wizard.step == 2 %}
+                    <h2 class="section-title">Select Target Markets</h2>
+                    <p class="text-muted mb-6">A value dossier variant is produced for each selected market.</p>
+
+                    <div class="option-grid option-grid--2">
+                        {% for market in markets %}
+                            <label class="option-card">
+                                <input type="checkbox" name="markets" value="{{ market.id }}"
+                                       {% if market.id in wizard.markets %}checked{% endif %}>
+                                <span class="option-card__inner">
+                                    <span class="option-card__check">{{ icons.icon("check-circle", 24) }}</span>
+                                    <span class="option-card__body">
+                                        <span class="option-card__title">{{ market.name }}</span>
+                                        <span class="option-card__desc">{{ market.region }} · {{ market.framework }}</span>
+                                    </span>
+                                </span>
+                            </label>
+                        {% endfor %}
+                    </div>
+
+                {# ------------------------------------------------------ Step 3 #}
+                {% elif wizard.step == 3 %}
+                    <h2 class="section-title">Select Content Languages</h2>
+                    <p class="text-muted mb-6">Spanish-language output is required for AEMPS labelling and CCAA tenders.</p>
+
+                    <div class="option-grid option-grid--2">
+                        {% for language in languages %}
+                            {% set relevant = language.markets | select("in", wizard.markets) | list | length > 0 %}
+                            <label class="option-card option-card--green" {% if not relevant %}style="opacity:.55"{% endif %}>
+                                <input type="checkbox" name="languages" value="{{ language.code }}"
+                                       {% if language.code in wizard.languages %}checked{% endif %}>
+                                <span class="option-card__inner">
+                                    <span class="option-card__check">{{ icons.icon("check-circle", 24) }}</span>
+                                    <span class="option-card__body">
+                                        <span class="option-card__title">
+                                            {{ icons.icon("globe", 14) }} {{ language.name }}
+                                        </span>
+                                        <span class="option-card__desc">
+                                            {% if relevant %}Recommended for the selected markets{% else %}Not required by the current market selection{% endif %}
+                                        </span>
+                                    </span>
+                                </span>
+                            </label>
+                        {% endfor %}
+                    </div>
+
+                {# ------------------------------------------------------ Step 4 #}
+                {% elif wizard.step == 4 %}
+                    <h2 class="section-title">AI Generation Instructions</h2>
+                    <p class="text-muted mb-6">Parameters applied to every section of the dossier.</p>
+
+                    <div class="field">
+                        <label class="field__label" for="database">Preferred literature database</label>
+                        <select class="select" name="database" id="database">
+                            <option value="">Select database…</option>
+                            {% for option in databases %}
+                                <option value="{{ option }}" {% if wizard.database == option %}selected{% endif %}>{{ option }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+
+                    <div class="field">
+                        <label class="field__label" for="methodology">Methodology for comparative analysis</label>
+                        <select class="select" name="methodology" id="methodology">
+                            <option value="">Select methodology…</option>
+                            {% for option in methodologies %}
+                                <option value="{{ option }}" {% if wizard.methodology == option %}selected{% endif %}>{{ option }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+
+                    <div class="field">
+                        <label class="field__label" for="special_requirements">Special requirements</label>
+                        <textarea class="textarea textarea--tall" name="special_requirements"
+                                  id="special_requirements"
+                                  placeholder="Endpoints to emphasise, comparators, patient subgroups, regulatory precedents…">{{ wizard.special_requirements }}</textarea>
+                        <p class="field__hint">This text is written into the brief and becomes part of the prompt baseline.</p>
+                    </div>
+
+                    <div class="info-panel mt-4">
+                        <h4>Generation parameters</h4>
+                        <ul>
+                            <li>• Documents are generated from the uploaded pivotal data only</li>
+                            <li>• MDR and AEMPS requirements are applied per the selected frameworks</li>
+                            <li>• Comparative statements are labelled as indirect</li>
+                            <li>• Every run is recorded in the append-only audit trail</li>
+                        </ul>
+                    </div>
+
+                {# ------------------------------------------------------ Step 5 #}
+                {% else %}
+                    <h2 class="section-title">Review &amp; Submit</h2>
+                    <p class="text-muted mb-6">Confirm the configuration before queuing generation.</p>
+
+                    <div class="stack-4">
+                        <div class="muted-panel">
+                            <h3>{{ icons.icon("upload", 16) }} Data files</h3>
+                            <ul class="text-sm text-muted" style="list-style:none">
+                                {% for file in stats.files %}<li>• {{ file.filename }}</li>{% endfor %}
+                            </ul>
+                        </div>
+
+                        <div class="muted-panel">
+                            <h3>Target markets</h3>
+                            <div class="row row--wrap" style="gap:.5rem">
+                                {% for market in markets if market.id in wizard.markets %}
+                                    <span class="badge badge--blue">{{ market.name }}</span>
+                                {% endfor %}
+                            </div>
+                        </div>
+
+                        <div class="muted-panel">
+                            <h3>{{ icons.icon("globe", 16) }} Languages</h3>
+                            <div class="row row--wrap" style="gap:.5rem">
+                                {% for language in languages if language.code in wizard.languages %}
+                                    <span class="badge badge--green">{{ language.name }}</span>
+                                {% endfor %}
+                            </div>
+                        </div>
+
+                        <div class="muted-panel">
+                            <h3>AI settings</h3>
+                            <div class="text-sm text-muted stack-2">
+                                <p><strong class="text-strong">Database:</strong> {{ wizard.database or 'not set' }}</p>
+                                <p><strong class="text-strong">Methodology:</strong> {{ wizard.methodology or 'not set' }}</p>
+                                {% if wizard.special_requirements %}
+                                    <p><strong class="text-strong">Special requirements:</strong> {{ wizard.special_requirements }}</p>
+                                {% endif %}
+                            </div>
+                        </div>
+
+                        <div class="alert alert--green" style="margin-bottom:0">
+                            {{ icons.icon("check-circle", 20) }}
+                            <div class="flex-1">
+                                <div class="alert__title">Ready to generate</div>
+                                <div class="alert__body">
+                                    <p>Submitting writes these choices to the brief and takes you to the dossier
+                                       generator, where all {{ brief.dossier_sections | length if brief.dossier_sections else 10 }}
+                                       sections are produced.</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                {% endif %}
+
+            </div>
+        </div>
+
+        <div class="btn-row btn-row--between">
+            <button type="submit" name="action" value="back" class="btn btn--outline btn--lg"
+                    {% if wizard.step == 1 %}disabled{% endif %}>
+                {{ icons.icon("chevron-left", 20) }} Previous
+            </button>
+
+            {% if wizard.step < steps | length %}
+                <button type="submit" name="action" value="next" class="btn btn--primary btn--lg">
+                    Next {{ icons.icon("chevron-right", 20) }}
+                </button>
+            {% else %}
+                <button type="submit" name="action" value="submit" class="btn btn--success btn--lg">
+                    {{ icons.icon("check-circle", 20) }} Submit &amp; Generate Documents
+                </button>
+            {% endif %}
+        </div>
+    </form>
+</div>
+{% endblock %}

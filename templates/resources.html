@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% import "_icons.html" as icons %}
+{% block title %}Resources{% endblock %}
+
+{% block content %}
+<div class="page page--md">
+    <div class="page-header">
+        <h1>Resources</h1>
+        <p>Regulations, guidance, standards and templates referenced by the generated documents.</p>
+    </div>
+
+    <div class="card filter-bar">
+        <div class="chip-row">
+            {% for type in types %}
+                <a href="{{ url_for('resources', type=type) }}"
+                   class="chip {% if selected_type == type %}is-active{% endif %}">{{ type }}</a>
+            {% endfor %}
+        </div>
+    </div>
+
+    <div class="stack-4">
+        {% for item in items %}
+            <div class="card doc-card">
+                <span class="doc-card__icon">{{ icons.icon("book-open", 24) }}</span>
+                <div class="doc-card__body">
+                    <h3 class="doc-card__title">{{ item.title }}</h3>
+                    <div class="doc-card__pills">
+                        <span class="badge badge--purple">{{ item.type }}</span>
+                        <span class="badge badge--slate">{{ item.source }}</span>
+                        {% for tag in item.tags %}<span class="tag">{{ tag }}</span>{% endfor %}
+                    </div>
+                    <p class="text-sm text-muted">{{ item.description }}</p>
+                </div>
+            </div>
+        {% else %}
+            <div class="card empty-state">
+                {{ icons.icon("book-open", 48) }}
+                <h3>No resources of this type</h3>
+                <p>Choose another filter to see more.</p>
+            </div>
+        {% endfor %}
+    </div>
+</div>
+{% endblock %}

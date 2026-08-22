@@ -1,0 +1,327 @@
+{% extends "base.html" %}
+{% import "_icons.html" as icons %}
+{% block title %}Global Value Dossier{% endblock %}
+
+{% block content %}
+<div class="page page--sm">
+    <div class="page-header">
+        <h1>Generate Global Value Dossier</h1>
+        <p>Create a comprehensive MDR-aligned value dossier, section by section, from the uploaded
+           pivotal dataset.</p>
+    </div>
+
+    {# ------------------------------------------------------------ Configuration #}
+    <div class="card mb-6">
+        <div class="card__header">
+            <h2 class="card__title">Dossier Configuration</h2>
+            <p class="card__subtitle">Inherited from the client brief (v{{ brief.version }}) — read-only baseline.</p>
+        </div>
+        <div class="card__body">
+            <div class="form-grid form-grid--2">
+                <div class="field">
+                    <label class="field__label">Therapeutic Area</label>
+                    <input class="input" value="{{ brief.therapeutic_area }}" readonly>
+                </div>
+                <div class="field">
+                    <label class="field__label">Target Markets</label>
+                    <input class="input" value="{{ brief.target_markets | join(', ') }}" readonly>
+                </div>
+                <div class="field">
+                    <label class="field__label">Regulatory Frameworks</label>
+                    <input class="input" value="{{ brief.regulatory_frameworks | join(', ') }}" readonly>
+                </div>
+                <div class="field">
+                    <label class="field__label">Languages</label>
+                    <input class="input" value="{{ brief.languages | join(', ') }}" readonly>
+                </div>
+                <div class="field form-grid__full">
+                    <label class="field__label">Regional Tender Specifications</label>
+                    <input class="input" value="{{ brief.regional_tender_spec or '' }}" readonly>
+                    <p class="field__hint">Content is mapped to localised public purchasing criteria.</p>
+                </div>
+            </div>
+
+            <div class="info-panel mt-4">
+                <h4>Evidence base available to the generator</h4>
+                <ul>
+                    <li>• {{ stats.study.patients or 0 }} patients · mean MARD {{ stats.study.mean_mard or '—' }}%
+                        · {{ stats.study.mean_wear_days or '—' }}-day wear</li>
+                    <li>• {{ stats.safety.total or 0 }} adverse events
+                        ({{ stats.safety.serious or 0 }} serious, {{ stats.safety.resolution_pct or 0 }}% resolved)</li>
+                    <li>• {{ stats.efficacy.count or 0 }} statistical endpoints with 95% confidence intervals</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+
+    {# ------------------------------------------------------- Generation engine #}
+    <div class="card mb-6">
+        <div class="card__header">
+            <h2 class="card__title">Generation Engine</h2>
+            <p class="card__subtitle">Runs offline by default. Add an API key to generate with a live model.</p>
+        </div>
+        <div class="card__body">
+            <div class="form-grid form-grid--2">
+                <div class="field">
+                    <label class="field__label" for="provider">LLM Provider</label>
+                    <select class="select" id="provider">
+                        {% for key, provider in providers.items() %}
+                            <option value="{{ key }}">{{ provider.label }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="field">
+                    <label class="field__label" for="model">Model</label>
+                    <select class="select" id="model"></select>
+                </div>
+                <div class="field form-grid__full" id="apiKeyField" hidden>
+                    <label class="field__label" for="apiKey">API Key (optional)</label>
+                    <input class="input" type="password" id="apiKey"
+                           placeholder="Leave blank to use an environment variable, or fall back to offline">
+                    <p class="field__hint">Used for this request only. Never stored, never written to the audit trail.</p>
+                </div>
+                <div class="field form-grid__full">
+                    <label class="field__label" for="overlay">Expert Overlay (Layer 3)</label>
+                    <textarea class="textarea" id="overlay"
+                              placeholder="Add emphasis, corrections or specific guidance. This layer is combined with the client baseline and the deliverable template."></textarea>
+                    <div class="provenance mt-4">
+                        <span class="provenance__key"><span class="provenance__swatch swatch--client"></span> Layer 1 — client baseline</span>
+                        <span class="provenance__key"><span class="provenance__swatch swatch--template"></span> Layer 2 — deliverable template</span>
+                        <span class="provenance__key"><span class="provenance__swatch swatch--expert"></span> Layer 3 — expert overlay</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    {# ---------------------------------------------------------------- Progress #}
+    <div class="alert alert--blue" id="progressPanel" hidden>
+        <div class="flex-1">
+            <div class="row row--between mb-2">
+                <span class="text-sm" style="font-weight:500">Generating dossier sections…</span>
+                <span class="text-sm" id="progressLabel">0 of {{ sections | length }} completed</span>
+            </div>
+            <div class="progress"><div class="progress__bar" id="progressBar" style="width:0%"></div></div>
+        </div>
+    </div>
+
+    {# ---------------------------------------------------------------- Sections #}
+    <div class="card mb-6">
+        <div class="card__header">
+            <div class="row row--between">
+                <div>
+                    <h2 class="card__title">Dossier Sections</h2>
+                    <p class="card__subtitle">Generated from your uploaded data and the selected frameworks.</p>
+                </div>
+                <span class="badge badge--green" id="doneBadge"
+                      {% if not completed_count %}hidden{% endif %}>
+                    {{ completed_count }} generated
+                </span>
+            </div>
+        </div>
+        <div class="divide-y" id="sectionList">
+            {% for section in sections %}
+                <div class="section-row" data-section="{{ section.id }}">
+                    <button type="button" class="section-row__head">
+                        <span class="section-row__main">
+                            <span class="section-status">
+                                {% if section.id in generated %}
+                                    <span style="color:var(--green-600);display:flex">{{ icons.icon("check-circle", 20) }}</span>
+                                {% else %}
+                                    <span class="status-dot"></span>
+                                {% endif %}
+                            </span>
+                            <span class="flex-1">
+                                <span class="section-row__title">{{ section.title }}</span><br>
+                                <span class="section-row__desc">{{ section.description }}</span>
+                                <span class="progress progress--thin mt-2 section-progress" hidden>
+                                    <span class="progress__bar" style="width:0%"></span>
+                                </span>
+                            </span>
+                        </span>
+                        <span class="chevron">{{ icons.icon("chevron-down", 20) }}</span>
+                    </button>
+
+                    <div class="section-row__panel" hidden>
+                        <div class="section-body">
+                            {% if section.id in generated %}
+                                <p class="text-sm">
+                                    Generated with
+                                    <strong class="text-strong">{{ generated[section.id].model }}</strong>
+                                    {% if generated[section.id].offline %}(offline simulation){% endif %}.
+                                </p>
+                                <a class="link-cta mt-4" href="{{ url_for('dossier_section', section_id=section.id) }}">
+                                    Open, review and refine {{ icons.icon("arrow-right", 16) }}
+                                </a>
+                            {% else %}
+                                <p>This section will be generated from the uploaded pivotal data and the
+                                   selected regulatory frameworks.</p>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+            {% endfor %}
+        </div>
+    </div>
+
+    <div class="btn-row">
+        <button type="button" class="btn btn--primary btn--lg btn--block" id="generateBtn">
+            {{ icons.icon("sparkles", 20) }} <span id="generateLabel">Generate Dossier with AI</span>
+        </button>
+        {% if completed_count %}
+            <a href="{{ url_for('documents') }}" class="btn btn--success btn--lg">
+                {{ icons.icon("download", 20) }} Open Library
+            </a>
+        {% endif %}
+    </div>
+
+    <p class="text-xs text-faint mt-4">
+        Every run is written to the append-only audit trail with its provider, model and prompt provenance.
+    </p>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function () {
+    var PROVIDERS = {{ providers | tojson }};
+    var SECTIONS = {{ sections | map(attribute='id') | list | tojson }};
+
+    var providerEl = document.getElementById("provider");
+    var modelEl = document.getElementById("model");
+    var apiKeyField = document.getElementById("apiKeyField");
+    var apiKeyEl = document.getElementById("apiKey");
+    var overlayEl = document.getElementById("overlay");
+
+    var generateBtn = document.getElementById("generateBtn");
+    var generateLabel = document.getElementById("generateLabel");
+    var progressPanel = document.getElementById("progressPanel");
+    var progressBar = document.getElementById("progressBar");
+    var progressLabel = document.getElementById("progressLabel");
+    var doneBadge = document.getElementById("doneBadge");
+
+    function syncModels() {
+        var provider = providerEl.value;
+        modelEl.innerHTML = "";
+        (PROVIDERS[provider].models || []).forEach(function (model) {
+            var option = document.createElement("option");
+            option.value = model;
+            option.textContent = model;
+            modelEl.appendChild(option);
+        });
+        apiKeyField.hidden = provider === "offline";
+    }
+
+    providerEl.addEventListener("change", syncModels);
+    syncModels();
+
+    // Collapsible sections
+    document.querySelectorAll(".section-row__head").forEach(function (head) {
+        head.addEventListener("click", function () {
+            var row = head.closest(".section-row");
+            var panel = row.querySelector(".section-row__panel");
+            panel.hidden = !panel.hidden;
+            row.classList.toggle("is-open", !panel.hidden);
+        });
+    });
+
+    function setSectionState(sectionId, state, html) {
+        var row = document.querySelector('.section-row[data-section="' + sectionId + '"]');
+        var status = row.querySelector(".section-status");
+        var bar = row.querySelector(".section-progress");
+
+        if (state === "generating") {
+            status.innerHTML = '<span class="spinner" style="color:var(--blue-600)"></span>';
+            bar.hidden = false;
+            bar.querySelector(".progress__bar").style.width = "35%";
+        } else if (state === "done") {
+            status.innerHTML =
+                '<span style="color:var(--green-600);display:flex">' +
+                '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" ' +
+                'fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" ' +
+                'stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>' +
+                '<path d="m9 11 3 3L22 4"/></svg></span>';
+            bar.querySelector(".progress__bar").style.width = "100%";
+            setTimeout(function () { bar.hidden = true; }, 400);
+            if (html) {
+                row.querySelector(".section-body").innerHTML = html;
+            }
+        } else if (state === "error") {
+            status.innerHTML =
+                '<span style="color:var(--red-600);display:flex">' +
+                '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" ' +
+                'fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/>' +
+                '<line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg></span>';
+            bar.hidden = true;
+        }
+    }
+
+    generateBtn.addEventListener("click", function () {
+        generateBtn.disabled = true;
+        generateLabel.textContent = "Generating…";
+        progressPanel.hidden = false;
+
+        var payloadBase = {
+            provider: providerEl.value,
+            model: modelEl.value,
+            api_key: apiKeyEl.value,
+            overlay: overlayEl.value
+        };
+
+        var index = 0;
+        var completed = 0;
+
+        function next() {
+            if (index >= SECTIONS.length) {
+                generateBtn.disabled = false;
+                generateLabel.textContent = "Regenerate Dossier";
+                progressLabel.textContent = completed + " of " + SECTIONS.length + " completed";
+                setTimeout(function () { window.location.reload(); }, 600);
+                return;
+            }
+
+            var sectionId = SECTIONS[index];
+            setSectionState(sectionId, "generating");
+
+            fetch("{{ url_for('api_generate_section') }}", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(Object.assign({ section_id: sectionId }, payloadBase))
+            })
+            .then(function (response) { return response.json().then(function (data) {
+                return { ok: response.ok, data: data };
+            }); })
+            .then(function (result) {
+                if (!result.ok) {
+                    setSectionState(sectionId, "error");
+                    progressLabel.textContent = result.data.error || "Generation failed";
+                } else {
+                    completed += 1;
+                    var link = '<a class="link-cta" href="/global-dossier/section/' + sectionId + '">' +
+                               'Open, review and refine →</a>';
+                    var note = result.data.note
+                        ? '<p class="text-sm" style="color:var(--amber-700)">' + result.data.note + '</p>'
+                        : '<p class="text-sm">Generated with <strong>' + result.data.model + '</strong>' +
+                          (result.data.offline ? " (offline simulation)" : "") + '.</p>';
+                    setSectionState(sectionId, "done", note + link);
+
+                    progressBar.style.width = (100 * completed / SECTIONS.length) + "%";
+                    progressLabel.textContent = completed + " of " + SECTIONS.length + " completed";
+                    doneBadge.hidden = false;
+                    doneBadge.textContent = completed + " generated";
+                }
+                index += 1;
+                next();
+            })
+            .catch(function () {
+                setSectionState(sectionId, "error");
+                index += 1;
+                next();
+            });
+        }
+
+        next();
+    });
+})();
+</script>
+{% endblock %}

@@ -3,9 +3,20 @@
 Design specification for the Client and User views, the prompt composition model, the
 multi-round refinement loop, and the audit trail that ties them together.
 
-**Status:** specification for the next build — Python with a launchable HTML interface.
-This describes the target, not what exists today. For what exists, see
-[`prototype-analysis.md`](prototype-analysis.md).
+**Status:** built, with one deliberate change. The prompt composition model (§2–§3), the
+refinement loop and the audit trail are implemented as specified in `app.py` and `core/`.
+
+**What changed:** the hard Client/User split described below was replaced by the
+**role-based model** from the Figma design — Administrator, Medical Writer, Medical Science
+Liaison, Compliance Officer — surfaced on `/settings` and enforced server-side. The
+separation of duties this document argues for survives intact; it is expressed as a
+permission matrix over one workspace rather than as two separate applications, which is the
+friendlier arrangement the Figma proved out. Read "Client view" as *the upload and brief
+pages under a role with `upload_data`*, and "User view" as *the generation pages under a role
+with `edit_documents`*.
+
+See [`interface-spec.md`](interface-spec.md) for the interface as built, and
+[`prototype-analysis.md`](prototype-analysis.md) for the earlier prototypes.
 
 ---
 

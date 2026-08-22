@@ -1,0 +1,232 @@
+{% extends "base.html" %}
+{% import "_icons.html" as icons %}
+{% block title %}MSL Materials{% endblock %}
+
+{% block content %}
+<div class="page page--sm">
+    <div class="page-header">
+        <h1>Generate MSL Scientific Materials</h1>
+        <p>Create medical scientific communication materials for Medical Science Liaisons, grounded
+           in the same pivotal dataset as the dossier.</p>
+    </div>
+
+    <form method="POST" id="mslForm">
+        {# ------------------------------------------------------ Material type #}
+        <div class="card mb-6">
+            <div class="card__header">
+                <h2 class="card__title">Select Material Type</h2>
+            </div>
+            <div class="card__body">
+                <div class="option-grid option-grid--2">
+                    {% for material in materials %}
+                        <label class="option-card">
+                            <input type="radio" name="material_type" value="{{ material.id }}"
+                                   {% if generated and generated.material.id == material.id %}checked{% endif %}
+                                   required>
+                            <span class="option-card__inner">
+                                <span class="option-card__icon">{{ icons.icon(material.icon, 20) }}</span>
+                                <span class="option-card__body">
+                                    <span class="option-card__title">{{ material.name }}</span>
+                                    <span class="option-card__desc">{{ material.description }}</span>
+                                    <span class="text-xs text-faint">Est. generation time: {{ material.estimate }}</span>
+                                </span>
+                            </span>
+                        </label>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+
+        {# ----------------------------------------------------- Content config #}
+        <div class="card mb-6">
+            <div class="card__header">
+                <h2 class="card__title">Content Configuration</h2>
+            </div>
+            <div class="card__body">
+                <div class="field">
+                    <label class="field__label" for="audience">Target Audience</label>
+                    <select class="select" name="audience" id="audience" required>
+                        <option value="">Select audience…</option>
+                        {% for value, label in audiences %}
+                            <option value="{{ value }}"
+                                {% if generated and generated.config.audience == value %}selected{% endif %}>
+                                {{ label }}
+                            </option>
+                        {% endfor %}
+                    </select>
+                </div>
+
+                <div class="field">
+                    <label class="field__label" for="focus_area">Focus Area</label>
+                    <select class="select" name="focus_area" id="focus_area" required>
+                        <option value="">Select focus area…</option>
+                        {% for value, label in focus_areas %}
+                            <option value="{{ value }}"
+                                {% if generated and generated.config.focus_area == value %}selected{% endif %}>
+                                {{ label }}
+                            </option>
+                        {% endfor %}
+                    </select>
+                </div>
+
+                <div class="field">
+                    <label class="field__label">Tone</label>
+                    <div class="segmented">
+                        {% for tone in tones %}
+                            <span class="segmented__option">
+                                <input type="radio" name="tone" value="{{ tone }}" id="tone-{{ tone }}"
+                                    {% if (generated and generated.config.tone == tone) or (not generated and tone == 'scientific') %}checked{% endif %}>
+                                <label class="segmented__label" for="tone-{{ tone }}">{{ tone | capitalize }}</label>
+                            </span>
+                        {% endfor %}
+                    </div>
+                </div>
+
+                <div class="field">
+                    <label class="field__label" for="key_messages">Key Messages (optional)</label>
+                    <textarea class="textarea" name="key_messages" id="key_messages"
+                              placeholder="Talking points to emphasise — these become the expert overlay layer of the prompt.">{{ generated.config.key_messages if generated else '' }}</textarea>
+                </div>
+
+                <div class="mt-6" style="padding-top:1.5rem;border-top:1px solid var(--slate-200)">
+                    <h3 class="text-strong mb-4">Brand Guidelines</h3>
+                    <div class="field">
+                        <label class="field__label">Corporate Presentation Template (.potx)</label>
+                        <div class="input-group">
+                            <input class="input" placeholder="No file selected" readonly>
+                            <a href="{{ url_for('upload') }}" class="btn btn--primary">
+                                {{ icons.icon("upload", 16) }} Upload
+                            </a>
+                        </div>
+                    </div>
+                    <div class="field">
+                        <label class="field__label">Brand Guidelines Document (PDF)</label>
+                        <div class="input-group">
+                            <input class="input" placeholder="No file selected" readonly>
+                            <a href="{{ url_for('upload') }}" class="btn btn--primary">
+                                {{ icons.icon("upload", 16) }} Upload
+                            </a>
+                        </div>
+                    </div>
+                    <p class="field__hint">Uploaded brand assets make generated materials immediately field-ready.</p>
+                </div>
+            </div>
+        </div>
+
+        {# ------------------------------------------------------------- Engine #}
+        <div class="card mb-6">
+            <div class="card__header">
+                <h2 class="card__title">Generation Engine</h2>
+                <p class="card__subtitle">Offline by default — add a key to use a live model.</p>
+            </div>
+            <div class="card__body">
+                <div class="form-grid form-grid--2">
+                    <div class="field">
+                        <label class="field__label" for="provider">LLM Provider</label>
+                        <select class="select" name="provider" id="provider">
+                            {% for key, provider in providers.items() %}
+                                <option value="{{ key }}">{{ provider.label }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="field">
+                        <label class="field__label" for="model">Model</label>
+                        <select class="select" name="model" id="model"></select>
+                    </div>
+                    <div class="field form-grid__full" id="apiKeyField" hidden>
+                        <label class="field__label" for="api_key">API Key (optional)</label>
+                        <input class="input" type="password" name="api_key" id="api_key"
+                               placeholder="Leave blank to fall back to the offline generator">
+                        <p class="field__hint">Used for this request only. Never stored or logged.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <button type="submit" class="btn btn--primary btn--lg btn--block" id="generateBtn">
+            {{ icons.icon("sparkles", 20) }} Generate Material with AI
+        </button>
+    </form>
+
+    {# ------------------------------------------------------------- Generated #}
+    {% if generated %}
+        <div class="card mt-6">
+            <div class="card__header">
+                <div class="row row--between">
+                    <div>
+                        <h2 class="card__title">{{ generated.material.name }}</h2>
+                        <p class="card__subtitle">
+                            {{ generated.model }}{% if generated.provider == 'offline' %} (offline simulation){% endif %}
+                        </p>
+                    </div>
+                    <span class="badge badge--green">Ready</span>
+                </div>
+            </div>
+            <div class="card__body">
+                <div class="output">{{ generated.output | markdown | safe }}</div>
+
+                <div class="meta-grid">
+                    <div>
+                        <div class="meta-grid__label">Evidence base</div>
+                        <div class="meta-grid__value">{{ stats.study.patients or 0 }} patients</div>
+                    </div>
+                    <div>
+                        <div class="meta-grid__label">Endpoints cited</div>
+                        <div class="meta-grid__value">{{ stats.efficacy.count or 0 }}</div>
+                    </div>
+                    <div>
+                        <div class="meta-grid__label">Word count</div>
+                        <div class="meta-grid__value">~{{ generated.output.split() | length }} words</div>
+                    </div>
+                    <div>
+                        <div class="meta-grid__label">Adverse events</div>
+                        <div class="meta-grid__value">{{ stats.safety.total or 0 }}</div>
+                    </div>
+                </div>
+
+                <div class="btn-row mt-6">
+                    <a href="{{ url_for('document_detail', run_id=generated.id) }}" class="btn btn--primary flex-1"
+                       style="justify-content:center">
+                        {{ icons.icon("file-text", 16) }} Open &amp; Refine
+                    </a>
+                    <a href="{{ url_for('download_document', run_id=generated.id) }}" class="btn btn--outline">
+                        {{ icons.icon("download", 16) }} Download
+                    </a>
+                </div>
+            </div>
+        </div>
+    {% endif %}
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function () {
+    var PROVIDERS = {{ providers | tojson }};
+    var providerEl = document.getElementById("provider");
+    var modelEl = document.getElementById("model");
+    var apiKeyField = document.getElementById("apiKeyField");
+    var form = document.getElementById("mslForm");
+    var button = document.getElementById("generateBtn");
+
+    function syncModels() {
+        modelEl.innerHTML = "";
+        (PROVIDERS[providerEl.value].models || []).forEach(function (model) {
+            var option = document.createElement("option");
+            option.value = model;
+            option.textContent = model;
+            modelEl.appendChild(option);
+        });
+        apiKeyField.hidden = providerEl.value === "offline";
+    }
+
+    providerEl.addEventListener("change", syncModels);
+    syncModels();
+
+    form.addEventListener("submit", function () {
+        button.disabled = true;
+        button.innerHTML = '<span class="spinner"></span> Generating material…';
+    });
+})();
+</script>
+{% endblock %}

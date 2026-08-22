@@ -1,0 +1,140 @@
+{% extends "base.html" %}
+{% import "_icons.html" as icons %}
+{% block title %}Settings{% endblock %}
+
+{% block content %}
+<div class="page page--lg">
+    <div class="page-header">
+        <h1>Role-Based Access Control</h1>
+        <p>Configure permissions per role so document handling stays inside the regulatory framework.</p>
+    </div>
+
+    <div class="alert alert--amber">
+        {{ icons.icon("lock", 20) }}
+        <div class="flex-1">
+            <div class="alert__title">Compliance framework notice</div>
+            <div class="alert__body">
+                <p>Field teams (MSLs) are blocked from modifying approved medical or scientific text
+                   blocks, preserving document integrity after approval.</p>
+            </div>
+        </div>
+    </div>
+
+    <div class="card mb-6">
+        <div class="card__header">
+            <div class="row row--between">
+                <div class="row">
+                    <span style="color:var(--slate-600);display:flex">{{ icons.icon("users", 20) }}</span>
+                    <h2 class="card__title">User Roles &amp; Permissions</h2>
+                </div>
+                <span class="badge badge--blue">Active role: {{ current_role_label }}</span>
+            </div>
+        </div>
+        <div class="table-wrap">
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>Role</th>
+                        {% for key, label in permission_labels.items() %}
+                            <th class="is-center">{{ label }}</th>
+                        {% endfor %}
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for role in roles %}
+                        <tr>
+                            <td>
+                                <div class="row">
+                                    <span style="background:var(--blue-100);color:var(--blue-600);border-radius:var(--radius);padding:.5rem;display:flex">
+                                        {{ icons.icon("shield", 16) }}
+                                    </span>
+                                    <span class="text-strong">{{ role.name }}</span>
+                                </div>
+                            </td>
+                            {% for key in permission_labels %}
+                                <td class="is-center">
+                                    <form method="POST" style="display:inline">
+                                        <input type="hidden" name="role_id" value="{{ role.id }}">
+                                        <input type="hidden" name="permission" value="{{ key }}">
+                                        <button type="submit"
+                                                class="perm-toggle {% if role.permissions[key] %}is-on{% endif %}"
+                                                {% if role.id == 'admin' %}disabled title="Administrator permissions are fixed"{% endif %}>
+                                            {% if role.permissions[key] %}{{ icons.icon("check", 16) }}{% endif %}
+                                        </button>
+                                    </form>
+                                </td>
+                            {% endfor %}
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <div class="form-grid form-grid--2" style="align-items:start">
+        <div class="card">
+            <div class="card__header">
+                <h2 class="card__title">Key Restrictions</h2>
+            </div>
+            <div class="card__body stack-3">
+                <div class="row row--start" style="padding:.75rem;background:var(--red-50);border-radius:var(--radius)">
+                    <span style="color:var(--red-600);display:flex">{{ icons.icon("lock", 20) }}</span>
+                    <div>
+                        <h4 style="color:var(--red-900);font-weight:500;margin-bottom:.25rem">MSL text modification lock</h4>
+                        <p class="text-sm" style="color:var(--red-800)">
+                            Medical Science Liaisons cannot modify approved medical or scientific text blocks,
+                            preventing unauthorised changes to regulatory-approved content.
+                        </p>
+                    </div>
+                </div>
+                <div class="row row--start" style="padding:.75rem;background:var(--blue-50);border-radius:var(--radius)">
+                    <span style="color:var(--blue-600);display:flex">{{ icons.icon("shield", 20) }}</span>
+                    <div>
+                        <h4 style="color:var(--blue-900);font-weight:500;margin-bottom:.25rem">Approval workflow</h4>
+                        <p class="text-sm" style="color:var(--blue-700)">
+                            Document changes require Compliance Officer approval before they become final.
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card__header">
+                <h2 class="card__title">LLM Providers</h2>
+                <p class="card__subtitle">Offline generation always works. Keys unlock live models.</p>
+            </div>
+            <div class="card__body">
+                <div class="divide-y">
+                    {% for key, provider in providers.items() %}
+                        <div class="list-row" style="padding:.75rem 0">
+                            <div>
+                                <p class="text-strong">{{ provider.label }}</p>
+                                <p class="text-xs text-faint">{{ provider.models | join(', ') }}</p>
+                            </div>
+                            {% if key == 'offline' %}
+                                <span class="badge badge--green">Always available</span>
+                            {% elif env_keys.get(key) %}
+                                <span class="badge badge--green">Key in environment</span>
+                            {% else %}
+                                <span class="badge badge--slate">Key entered per request</span>
+                            {% endif %}
+                        </div>
+                    {% endfor %}
+                </div>
+
+                <div class="info-panel mt-4">
+                    <h4>Key handling</h4>
+                    <ul>
+                        <li>• Keys entered in the UI are used for one request and discarded</li>
+                        <li>• Keys are never written to the database or the audit trail</li>
+                        <li>• Set <code>ANTHROPIC_API_KEY</code>, <code>OPENAI_API_KEY</code> or
+                              <code>GOOGLE_API_KEY</code> to avoid retyping</li>
+                        <li>• A failed live call falls back to the offline draft</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

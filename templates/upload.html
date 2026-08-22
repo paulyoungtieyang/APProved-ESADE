@@ -1,0 +1,221 @@
+{% extends "base.html" %}
+{% import "_icons.html" as icons %}
+{% block title %}Upload Clinical Data{% endblock %}
+
+{% block content %}
+<div class="page page--sm">
+    <div class="page-header">
+        <h1>Upload Clinical Data</h1>
+        <p>Upload pivotal trial data for AI-assisted analysis and medical writing generation.</p>
+    </div>
+
+    {# ------------------------------------------------------------ Privacy note #}
+    <div class="alert alert--green">
+        {{ icons.icon("shield", 20) }}
+        <div class="flex-1">
+            <div class="alert__title">Data Privacy &amp; Security</div>
+            <div class="alert__body">
+                <p>✓ Uploads stay in a <strong>closed-loop environment</strong> on this machine</p>
+                <p>✓ Your data is <strong>never used for model training</strong></p>
+                <p>✓ Every file is SHA-256 checksummed and written to the append-only audit trail</p>
+                <p>✓ Generation runs offline by default — no data leaves the host without an API key</p>
+            </div>
+        </div>
+    </div>
+
+    {# --------------------------------------------------------------- Dropzone #}
+    <div class="card mb-6">
+        <div class="card__body">
+            <form method="POST" enctype="multipart/form-data" id="uploadForm">
+                <div class="dropzone" id="dropzone">
+                    <span class="dropzone__icon">{{ icons.icon("upload", 48) }}</span>
+                    <h3>Drop your files here, or browse</h3>
+                    <p>Supports CSV, XLSX, PDF, DOCX — max 100 MB per file</p>
+
+                    <label class="btn btn--primary" for="fileInput">
+                        {{ icons.icon("upload", 16) }} Browse Files
+                    </label>
+                    <input type="file" id="fileInput" name="files" class="file-input" multiple
+                           accept=".csv,.xlsx,.xls,.pdf,.docx,.doc,.txt">
+
+                    <div id="selectedFiles" class="mt-4" hidden></div>
+                </div>
+
+                <div class="row mt-4" style="gap:1rem;flex-wrap:wrap">
+                    <div style="flex:1;min-width:14rem">
+                        <label class="field__label" for="category">Data category</label>
+                        <select class="select" name="category" id="category">
+                            <option value="">Detect automatically</option>
+                            <option value="clinical">Clinical performance</option>
+                            <option value="safety">Safety / adverse events</option>
+                            <option value="efficacy">Efficacy endpoints</option>
+                            <option value="demographics">Demographics &amp; baseline</option>
+                            <option value="economics">Health economics / tender</option>
+                        </select>
+                    </div>
+                    <button type="submit" class="btn btn--primary" id="submitBtn" disabled
+                            style="align-self:flex-end">
+                        {{ icons.icon("upload", 16) }} Upload &amp; Checksum
+                    </button>
+                </div>
+            </form>
+
+            <div class="info-panel mt-4">
+                <h4>Accepted data types</h4>
+                <ul>
+                    <li>• Clinical performance data (accuracy, MARD, reference comparison)</li>
+                    <li>• Safety and adverse event reports</li>
+                    <li>• Patient demographics and baseline characteristics</li>
+                    <li>• Efficacy endpoint tables with confidence intervals</li>
+                    <li>• Health-economic and regional tender specifications</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+
+    {# --------------------------------------------------------- Uploaded files #}
+    <div class="card">
+        <div class="card__header">
+            <div class="row row--between">
+                <div>
+                    <h2 class="card__title">Uploaded Files ({{ stats.files | length }})</h2>
+                    <p class="card__subtitle">Each file is hashed so every generated claim stays reproducible.</p>
+                </div>
+                {% if stats.study.patients %}
+                    <span class="badge badge--green">{{ stats.study.patients }} patients parsed</span>
+                {% endif %}
+            </div>
+        </div>
+        <div class="card__body">
+            {% for file in stats.files %}
+                <div class="file-row">
+                    <div class="file-row__main">
+                        <span style="color:var(--slate-500);display:flex">{{ icons.icon("file", 20) }}</span>
+                        <div class="flex-1">
+                            <p class="file-row__name">{{ file.filename }}</p>
+                            <p class="file-row__meta">
+                                {{ file_size_label(file.size) }}
+                                {% if file.rows %} · {{ file.rows }} rows × {{ file.columns | length }} cols{% endif %}
+                                · <code style="font-size:.6875rem">{{ file.checksum[:12] }}…</code>
+                            </p>
+                            {% if file.error %}
+                                <p class="text-xs" style="color:var(--red-600)">{{ file.error }}</p>
+                            {% endif %}
+                        </div>
+                    </div>
+                    <div class="row" style="gap:.5rem">
+                        <span class="badge badge--slate">{{ file.category }}</span>
+                        {% if not file.error %}
+                            <span class="row text-xs" style="color:var(--green-600);gap:.25rem">
+                                {{ icons.icon("check-circle", 16) }} Verified
+                            </span>
+                        {% endif %}
+                        <form method="POST" action="{{ url_for('delete_upload', file_id=file.id) }}"
+                              onsubmit="return confirm('Remove {{ file.filename }} from this engagement?')">
+                            <button type="submit" class="icon-btn" title="Remove file">
+                                {{ icons.icon("x", 16) }}
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            {% else %}
+                <div class="empty-state">
+                    {{ icons.icon("file", 48) }}
+                    <h3>No files uploaded</h3>
+                    <p>Drop a CSV or XLSX above to get started.</p>
+                </div>
+            {% endfor %}
+        </div>
+    </div>
+
+    {# ------------------------------------------------------ Parsed statistics #}
+    {% if stats.study.patients or stats.safety.total %}
+        <div class="card mt-6">
+            <div class="card__header">
+                <h2 class="card__title">Parsed Dataset Summary</h2>
+                <p class="card__subtitle">These are the figures the generated documents will cite.</p>
+            </div>
+            <div class="card__body">
+                <div class="form-grid form-grid--2">
+                    {% if stats.study.patients %}
+                        <div class="muted-panel">
+                            <h3>Cohort</h3>
+                            <ul class="text-sm text-muted" style="list-style:none">
+                                <li>Patients: <strong class="text-strong">{{ stats.study.patients }}</strong></li>
+                                <li>Mean age: <strong class="text-strong">{{ stats.study.mean_age }}</strong> years</li>
+                                <li>Type 1 diabetes: <strong class="text-strong">{{ stats.study.type_1_pct }}%</strong></li>
+                                <li>Mean MARD: <strong class="text-strong">{{ stats.study.mean_mard }}%</strong></li>
+                                <li>Mean wear: <strong class="text-strong">{{ stats.study.mean_wear_days }}</strong> days</li>
+                            </ul>
+                        </div>
+                    {% endif %}
+                    {% if stats.safety.total %}
+                        <div class="muted-panel">
+                            <h3>Safety</h3>
+                            <ul class="text-sm text-muted" style="list-style:none">
+                                <li>Total events: <strong class="text-strong">{{ stats.safety.total }}</strong></li>
+                                <li>Serious: <strong class="text-strong">{{ stats.safety.serious }}</strong></li>
+                                <li>Resolved: <strong class="text-strong">{{ stats.safety.resolution_pct }}%</strong></li>
+                                {% for name, count in stats.safety.by_type.items() %}
+                                    <li>{{ name }}: {{ count }}</li>
+                                {% endfor %}
+                            </ul>
+                        </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    {% endif %}
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function () {
+    var zone = document.getElementById("dropzone");
+    var input = document.getElementById("fileInput");
+    var list = document.getElementById("selectedFiles");
+    var submit = document.getElementById("submitBtn");
+
+    ["dragenter", "dragover"].forEach(function (type) {
+        zone.addEventListener(type, function (event) {
+            event.preventDefault();
+            zone.classList.add("is-active");
+        });
+    });
+
+    ["dragleave", "drop"].forEach(function (type) {
+        zone.addEventListener(type, function (event) {
+            event.preventDefault();
+            zone.classList.remove("is-active");
+        });
+    });
+
+    zone.addEventListener("drop", function (event) {
+        if (event.dataTransfer.files.length) {
+            input.files = event.dataTransfer.files;
+            render();
+        }
+    });
+
+    input.addEventListener("change", render);
+
+    function render() {
+        var files = Array.prototype.slice.call(input.files);
+        if (!files.length) {
+            list.hidden = true;
+            submit.disabled = true;
+            return;
+        }
+        list.hidden = false;
+        list.innerHTML = files.map(function (file) {
+            return '<div class="file-row"><div class="file-row__main">' +
+                   '<div class="flex-1"><p class="file-row__name">' + file.name + '</p>' +
+                   '<p class="file-row__meta">' + (file.size / 1024).toFixed(1) + ' KB — ready to upload</p>' +
+                   '</div></div></div>';
+        }).join("");
+        submit.disabled = false;
+    }
+})();
+</script>
+{% endblock %}

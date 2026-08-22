@@ -1,0 +1,95 @@
+{% extends "base.html" %}
+{% import "_icons.html" as icons %}
+{% block title %}Document Library{% endblock %}
+
+{% block content %}
+<div class="page page--lg">
+    <div class="page-header">
+        <h1>Document Library</h1>
+        <p>Every generated document, organised by market, type and language — each one traceable
+           back to the prompt and dataset that produced it.</p>
+    </div>
+
+    <div class="card filter-bar">
+        <div class="filter-bar__head">
+            <span style="color:var(--slate-600);display:flex">{{ icons.icon("filter", 20) }}</span>
+            <h2 class="card__title">Filter Documents</h2>
+        </div>
+        <form method="GET" class="filter-grid" id="filterForm">
+            <div>
+                <label class="field__label" for="type">Document Type</label>
+                <select class="select" name="type" id="type">
+                    {% for option in doc_types %}
+                        <option value="{{ option }}" {% if selected.type == option %}selected{% endif %}>{{ option }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div>
+                <label class="field__label" for="market">Market / Regulation</label>
+                <select class="select" name="market" id="market">
+                    {% for option in markets %}
+                        <option value="{{ option }}" {% if selected.market == option %}selected{% endif %}>{{ option }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div>
+                <label class="field__label" for="language">Language</label>
+                <select class="select" name="language" id="language">
+                    {% for option in languages %}
+                        <option value="{{ option }}" {% if selected.language == option %}selected{% endif %}>{{ option }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+        </form>
+    </div>
+
+    <p class="text-sm text-muted mb-4">Showing {{ items | length }} of {{ total }} documents</p>
+
+    <div class="stack-4">
+        {% for item in items %}
+            <div class="card doc-card">
+                <span class="doc-card__icon">{{ icons.icon("file-text", 24) }}</span>
+                <div class="doc-card__body">
+                    <h3 class="doc-card__title">{{ item.title }}</h3>
+                    <div class="doc-card__pills">
+                        <span class="badge badge--purple">{{ item.type }}</span>
+                        <span class="badge badge--blue">{{ item.market }}</span>
+                        <span class="badge badge--green">{{ icons.icon("globe", 12) }} {{ item.language }}</span>
+                        <span class="badge {% if item.status == 'Final' %}badge--green{% else %}badge--amber{% endif %}">
+                            {{ item.status }}
+                        </span>
+                    </div>
+                    <div class="row row--wrap text-sm text-muted" style="gap:1rem">
+                        <span class="inline-meta">{{ icons.icon("calendar", 16) }}
+                            {{ item.date.strftime('%b %d, %Y') }}</span>
+                        <span>{{ item.size }}</span>
+                        <span>{{ item.model }}{% if item.provider == 'offline' %} (offline){% endif %}</span>
+                        <span>Round {{ item.round }}</span>
+                    </div>
+                </div>
+                <div class="doc-card__actions">
+                    <a href="{{ url_for('download_document', run_id=item.id) }}" class="btn btn--primary">
+                        {{ icons.icon("download", 16) }} Download
+                    </a>
+                    <a href="{{ url_for('document_detail', run_id=item.id) }}" class="btn btn--outline">Preview</a>
+                </div>
+            </div>
+        {% else %}
+            <div class="card empty-state">
+                {{ icons.icon("file-text", 48) }}
+                <h3>No documents found</h3>
+                <p>Adjust your filters, or generate a
+                   <a class="link-cta" href="{{ url_for('global_dossier') }}">value dossier</a> to populate the library.</p>
+            </div>
+        {% endfor %}
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+document.getElementById("filterForm").addEventListener("change", function () {
+    this.submit();
+});
+</script>
+{% endblock %}
