@@ -416,6 +416,11 @@ AI** platform usage."* Leftover from an earlier product name.
 
 ## 7. Suggested next steps
 
+> **Superseded in part.** The next build is now specified in
+> [`two-view-architecture.md`](two-view-architecture.md), which addresses §6.1, §6.2 and
+> §6.3 structurally by splitting the product into Client and User views over a shared
+> append-only audit trail. Items 4–7 below remain open and are not covered by that spec.
+
 Ordered by leverage:
 
 1. **Port the pipeline to GVD generation** — the highest-value work, and mostly a

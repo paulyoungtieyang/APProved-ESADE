@@ -52,9 +52,24 @@ own branch:
 | `prototype-2` | Next.js app; Global Value Dossier and MSL Materials wired to live Claude generation |
 | `prototype-1-ucla-version` (`v1.0`) | Python agentic EU MDR CE-mark drafting workflow — intake gates, parallel section drafting, automated compliance judge, human review loops, full audit trail |
 
-See [`docs/prototype-analysis.md`](docs/prototype-analysis.md) for a full breakdown of the
-prototype's functionality, the agentic pipeline behind generation, traceability to user
-testing, and open gaps.
+## Documentation
+
+| Document | What it covers |
+|---|---|
+| [`docs/prototype-analysis.md`](docs/prototype-analysis.md) | What exists today — module breakdown, the agentic pipeline behind generation, traceability to user testing, open gaps |
+| [`docs/two-view-architecture.md`](docs/two-view-architecture.md) | Specification for the next build — Client and User views, prompt composition, multi-round refinement, audit trail |
+
+## Next build
+
+A two-view tool in Python with a launchable HTML interface:
+
+- **Client view** — upload data and specify requirements (tone, audience, regulations,
+  target markets, key messages, brand assets). Recorded as immutable versioned briefs.
+- **User view** — APProved's expert composes prompts per deliverable type, inheriting the
+  client's specifications and layering their own edits on top, with model selection across
+  Anthropic, OpenAI, and Google.
+- **Multiple refinement rounds** between client and expert, with every brief version,
+  resolved prompt, model, and review decision written to an append-only audit trail.
 
 ## Value proposition
 
