@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}APProved{% endblock %}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    {% block extra_css %}{% endblock %}
+</head>
+<body>
+    <nav class="navbar">
+        <div class="navbar-brand">
+            <h1><a href="/">APProved</a></h1>
+            <p class="tagline">Medical Writing Platform</p>
+        </div>
+        <ul class="navbar-menu">
+            <li><a href="/">Home</a></li>
+            <li><a href="/client">Client View</a></li>
+            <li><a href="/user">User View</a></li>
+        </ul>
+    </nav>
+
+    <div class="container">
+        {% if error %}
+            <div class="alert alert-error">{{ error }}</div>
+        {% endif %}
+
+        {% block content %}{% endblock %}
+    </div>
+
+    <footer>
+        <p>&copy; 2026 APProved. Unlocking compliance as growth.</p>
+    </footer>
+
+    {% block extra_js %}{% endblock %}
+</body>
+</html>

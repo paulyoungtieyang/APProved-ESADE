@@ -1,0 +1,123 @@
+{% extends "base.html" %}
+
+{% block title %}Review Brief — Client View{% endblock %}
+
+{% block content %}
+<div class="review-container">
+    <h2>Review Your Brief</h2>
+
+    <div class="progress-indicator">
+        <span class="step">1. Upload</span> →
+        <span class="step">2. Specify</span> →
+        <span class="step active">3. Review</span>
+    </div>
+
+    <div class="brief-summary">
+        <h3>Engagement Summary</h3>
+        <p><strong>Client:</strong> {{ engagement.client_name }}</p>
+        <p><strong>Created:</strong> {{ engagement.created_at.strftime('%Y-%m-%d %H:%M:%S') }}</p>
+        <p><strong>Status:</strong>
+            {% if engagement.consent_given %}
+                <span class="badge badge-success">Consent Given</span>
+            {% else %}
+                <span class="badge badge-warning">Pending Consent</span>
+            {% endif %}
+        </p>
+    </div>
+
+    {% if brief %}
+        <div class="brief-details">
+            <h3>Brief v{{ brief.version }}</h3>
+            <table class="brief-table">
+                <tbody>
+                    <tr>
+                        <th>Deliverables</th>
+                        <td>{{ brief.deliverable_types|join(', ') }}</td>
+                    </tr>
+                    <tr>
+                        <th>Therapeutic Area</th>
+                        <td>{{ brief.therapeutic_area }}</td>
+                    </tr>
+                    <tr>
+                        <th>Target Markets</th>
+                        <td>{{ brief.target_markets|join(', ') }}</td>
+                    </tr>
+                    <tr>
+                        <th>Regulatory Frameworks</th>
+                        <td>{{ brief.regulatory_frameworks|join(', ') }}</td>
+                    </tr>
+                    <tr>
+                        <th>Languages</th>
+                        <td>{{ brief.languages|join(', ') }}</td>
+                    </tr>
+                    <tr>
+                        <th>Output Formats</th>
+                        <td>{{ brief.output_formats|join(', ') }}</td>
+                    </tr>
+                    <tr>
+                        <th>Tone</th>
+                        <td>{{ brief.tone }}</td>
+                    </tr>
+                    {% if brief.target_audience %}
+                    <tr>
+                        <th>Target Audience</th>
+                        <td>{{ brief.target_audience }}</td>
+                    </tr>
+                    {% endif %}
+                    {% if brief.key_messages %}
+                    <tr>
+                        <th>Key Messages</th>
+                        <td><pre>{{ brief.key_messages }}</pre></td>
+                    </tr>
+                    {% endif %}
+                    {% if brief.additional_requirements %}
+                    <tr>
+                        <th>Additional Requirements</th>
+                        <td><pre>{{ brief.additional_requirements }}</pre></td>
+                    </tr>
+                    {% endif %}
+                </tbody>
+            </table>
+        </div>
+    {% else %}
+        <p class="empty-state">No brief has been submitted yet.</p>
+    {% endif %}
+
+    <div class="action-bar">
+        <p>Your engagement is ready. The APProved expert team can now begin working on your deliverables.</p>
+        <a href="/client" class="btn btn-primary">Back to Engagements</a>
+    </div>
+</div>
+
+<style>
+.brief-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 1em 0;
+}
+
+.brief-table th {
+    text-align: left;
+    padding: 0.75em;
+    background-color: #f5f5f5;
+    font-weight: bold;
+    width: 20%;
+    vertical-align: top;
+}
+
+.brief-table td {
+    padding: 0.75em;
+    border-bottom: 1px solid #ddd;
+}
+
+.brief-table pre {
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    font-family: monospace;
+    font-size: 0.9em;
+    background-color: #fafafa;
+    padding: 0.5em;
+    border-radius: 4px;
+}
+</style>
+{% endblock %}

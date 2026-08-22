@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+
+{% block title %}APProved — Welcome{% endblock %}
+
+{% block content %}
+<div class="welcome">
+    <h2>Welcome to APProved</h2>
+    <p class="subtitle">Unlocking compliance as growth</p>
+
+    <div class="intro">
+        <p>APProved is a two-view medical writing platform that pairs agentic AI with human expert review.</p>
+        <ul>
+            <li><strong>Client View:</strong> Upload your clinical data, specify requirements (tone, audience, regulations, target markets), and review generated deliverables.</li>
+            <li><strong>User View:</strong> As an APProved expert, compose prompts per deliverable type, inherit client requirements, refine outputs, and manage multi-round reviews.</li>
+        </ul>
+    </div>
+
+    <div class="buttons">
+        <a href="/client" class="btn btn-primary">Client View</a>
+        <a href="/user" class="btn btn-secondary">User View</a>
+    </div>
+
+    <div class="features">
+        <h3>Key Features</h3>
+        <ul>
+            <li>✓ Immutable, versioned briefs with change tracking</li>
+            <li>✓ Multi-round refinement loops</li>
+            <li>✓ Append-only audit trail</li>
+            <li>✓ Provider selection (Anthropic, OpenAI, Google)</li>
+            <li>✓ Prompt composition with provenance tracking</li>
+            <li>✓ Role-based access control</li>
+        </ul>
+    </div>
+</div>
+{% endblock %}
