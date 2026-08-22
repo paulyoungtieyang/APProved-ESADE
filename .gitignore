@@ -1,0 +1,18 @@
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Claude Code local config
+.claude/
+
+# Editors
+.vscode/
+.idea/
+*.swp
+
+# Environments
+venv/
+.venv/
+__pycache__/
+node_modules/
