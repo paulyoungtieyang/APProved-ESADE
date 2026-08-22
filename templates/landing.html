@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>APProved — Medical Writing Platform</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📋</text></svg>">
+</head>
+<body>
+{% import "_icons.html" as icons %}
+
+<div class="landing">
+    <span class="landing__mark">{{ icons.icon("file-text", 32) }}</span>
+    <h1 class="landing__title">APProved</h1>
+    <p class="landing__subtitle">
+        Medical Writing Platform — turn clinical data into regulatory-ready documents.
+        Choose where you want to go.
+    </p>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+            <div style="width:100%;max-width:52rem;margin-top:1.5rem">
+                {% for category, message in messages %}
+                    <div class="alert alert--{{ 'green' if category == 'success' else 'red' if category == 'error' else 'blue' }}">
+                        {{ icons.icon("info", 20) }}
+                        <div class="flex-1"><div class="alert__body"><p>{{ message }}</p></div></div>
+                    </div>
+                {% endfor %}
+            </div>
+        {% endif %}
+    {% endwith %}
+
+    <div class="landing__choices">
+        <a href="{{ url_for('enter_tool') }}" class="choice-card choice-card--tool">
+            <span class="choice-card__icon">{{ icons.icon("briefcase", 22) }}</span>
+            <span class="choice-card__title">Open the Tool</span>
+            <span class="choice-card__desc">
+                A blank engagement. Upload your own clinical data, select your own regulatory
+                frameworks, and generate documents from scratch — nothing pre-loaded.
+            </span>
+            <ul class="choice-card__list">
+                <li>• No sample data — starts empty</li>
+                <li>• Your own brief, uploads and audit trail</li>
+                <li>• Kept completely separate from the demo</li>
+            </ul>
+            <span class="choice-card__cta">Start a new engagement {{ icons.icon("arrow-right", 16) }}</span>
+        </a>
+
+        <form method="POST" action="{{ url_for('enter_demo') }}" style="display:contents">
+            <button type="submit" class="choice-card choice-card--demo" style="width:100%;border:1px solid var(--slate-200);font:inherit;cursor:pointer">
+                <span class="choice-card__icon">{{ icons.icon("flask-conical", 22) }}</span>
+                <span class="choice-card__title">View the CGM Demo</span>
+                <span class="choice-card__desc">
+                    A pre-loaded example: a Class IIb continuous glucose monitoring device —
+                    hardware sensor plus bolus-calculator software — going through EU MDR
+                    conformity assessment for launch in Spain.
+                </span>
+                <ul class="choice-card__list">
+                    <li>• 20-patient pivotal dataset already uploaded</li>
+                    <li>• Brief, regulations and dossier sections ready to generate</li>
+                    <li>• Reset anytime — never touches your own workspace</li>
+                </ul>
+                <span class="choice-card__cta">Explore the demo {{ icons.icon("arrow-right", 16) }}</span>
+            </button>
+        </form>
+    </div>
+
+    <p class="landing__footnote">
+        The tool and the demo are two separate engagements — uploads, briefs and generated
+        documents in one are never visible from the other. Runs fully offline; no API key
+        required for either.
+    </p>
+</div>
+</body>
+</html>

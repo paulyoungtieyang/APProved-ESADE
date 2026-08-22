@@ -121,6 +121,10 @@ class GenerationRun(Base):
     max_tokens = Column(Integer, nullable=True)
     temperature = Column(Float, nullable=True)
 
+    # Formatting — which uploaded brand template (uploaded_file.id) this deliverable
+    # is rendered against when exported as PowerPoint. Null = default theme.
+    brand_template_id = Column(Integer, nullable=True)
+
     # Output
     generated_output = Column(Text, nullable=True)  # markdown or text
     output_hash = Column(String(64), nullable=True)  # SHA256 of output
@@ -192,8 +196,40 @@ class AuditEvent(Base):
     engagement = relationship("Engagement", back_populates="audit_events")
 
 
+def _add_missing_columns(engine):
+    """
+    Add columns that exist on the models but not yet in an older SQLite file.
+
+    `create_all` only creates missing *tables*, so a database created before a
+    column was introduced would otherwise fail at query time with a confusing
+    OperationalError. This keeps an existing storage/approved.db usable across
+    prototype revisions without a migration tool.
+    """
+    from sqlalchemy import inspect, text
+
+    inspector = inspect(engine)
+    existing_tables = set(inspector.get_table_names())
+
+    with engine.begin() as connection:
+        for table in Base.metadata.sorted_tables:
+            if table.name not in existing_tables:
+                continue
+            present = {col["name"] for col in inspector.get_columns(table.name)}
+            for column in table.columns:
+                if column.name in present or column.primary_key:
+                    continue
+                # Only nullable, default-less columns can be added safely in place.
+                if not column.nullable:
+                    continue
+                ddl = column.type.compile(engine.dialect)
+                connection.execute(
+                    text(f'ALTER TABLE {table.name} ADD COLUMN {column.name} {ddl}')
+                )
+
+
 def init_db(db_url: str):
-    """Create all tables."""
+    """Create all tables, then patch any columns added since the file was made."""
     engine = create_engine(db_url)
     Base.metadata.create_all(engine)
+    _add_missing_columns(engine)
     return engine

@@ -136,7 +136,7 @@ matters is a `<symbol>` sprite in `base.html` plus `<use>` references.
 | `RegulationsPage` | `regulations` | Framework list rewritten for medical devices — MDR and AEMPS lead, since the demo is a Class IIb device rather than a drug. Selection persists to the brief. |
 | `PolicyNewsPage` | `policy_news` | Feed rewritten around MDR / AEMPS / CCAA tenders. |
 | `GlobalDossierPage` | `global_dossier` | Ten sections (Figma has eight — device description and regulatory status added for MDR). Progress is driven by real per-section API calls, not a timer. |
-| `MSLMaterialPage` | `msl_material` | Same four material types; audiences and focus areas rewritten for diabetes care. |
+| `MSLMaterialPage` | `msl_material` | Same four material types; audiences and focus areas rewritten for diabetes care. The Figma's decorative brand-asset upload controls are replaced by a working template picker and file upload — decks export as real branded `.pptx`. |
 | `DocumentLibraryPage` | `documents` | Populated from real `generation_run` rows. |
 | `ResourcesPage` | `resources` | Rewritten for MDR guidance and device standards. |
 | `SubmissionPage` | `submission` | Same five steps; state persists server-side in the session and writes to the brief on submit. |
@@ -173,3 +173,21 @@ further changes.
 
 **A new colour:** add it as a `--token` in `:root` and use it through a component class.
 Avoid inline hex — the token table above is what keeps the port aligned with the Figma.
+
+**A new export format:** extend `download_document` in `app.py`, which branches on
+`deliverable_type`. Slide decks already route through `core/deck.py`; a DOCX path would
+follow the same shape — build bytes, write to `storage/`, log the export, `send_file`.
+
+---
+
+## 8. Two rules worth not breaking
+
+Both were live defects found in QA, not hypotheticals:
+
+- **`display` and the `hidden` attribute.** `.field`, `.alert` and friends set `display`, which
+  beats the UA stylesheet's `[hidden]` rule. The global `[hidden] { display: none !important; }`
+  is what keeps JS visibility toggling working. Without it the API-key fields and the dossier
+  progress panel are permanently visible.
+- **Inline `<span>`s inside `.option-card__body`.** They sit inside a `<label>`, so they were
+  written as spans; without the explicit `display: block` they run together on one line and
+  every `margin-bottom` silently does nothing. The rule now sets it for all children.

@@ -10,6 +10,11 @@
            in the same pivotal dataset as the dossier.</p>
     </div>
 
+    {# Declared outside the main form so the file input inside it can reference this
+       via form="brandUploadForm" — nested <form> elements are invalid HTML. #}
+    <form method="POST" action="{{ url_for('upload_brand_template') }}"
+          enctype="multipart/form-data" id="brandUploadForm"></form>
+
     <form method="POST" id="mslForm">
         {# ------------------------------------------------------ Material type #}
         <div class="card mb-6">
@@ -89,26 +94,73 @@
                 </div>
 
                 <div class="mt-6" style="padding-top:1.5rem;border-top:1px solid var(--slate-200)">
-                    <h3 class="text-strong mb-4">Brand Guidelines</h3>
+                    <h3 class="text-strong mb-4">Brand Template</h3>
+
                     <div class="field">
-                        <label class="field__label">Corporate Presentation Template (.potx)</label>
-                        <div class="input-group">
-                            <input class="input" placeholder="No file selected" readonly>
-                            <a href="{{ url_for('upload') }}" class="btn btn--primary">
-                                {{ icons.icon("upload", 16) }} Upload
-                            </a>
-                        </div>
+                        <label class="field__label" for="brand_template_id">
+                            Corporate presentation template
+                        </label>
+                        <select class="select" name="brand_template_id" id="brand_template_id">
+                            <option value=""
+                                {% if generated and not generated.config.brand_template_id %}selected{% endif %}>
+                                Default theme (no brand template)
+                            </option>
+                            {% for template in templates %}
+                                {# Keep the operator's choice after a POST; only fall back to
+                                   the newest template on a first, unsubmitted visit. #}
+                                <option value="{{ template.id }}"
+                                    {% if generated %}
+                                        {% if generated.config.brand_template_id == template.id | string %}selected{% endif %}
+                                    {% elif loop.first %}selected{% endif %}
+                                    {% if template.error %}disabled{% endif %}>
+                                    {{ template.filename }}
+                                    {%- if template.error %} — unreadable
+                                    {%- else %} — {{ template.layout_count }} layouts ·
+                                        {{ template.aspect_ratio }}
+                                        {%- if template.major_font %} · {{ template.major_font }}/{{ template.minor_font }}{% endif %}
+                                    {%- endif %}
+                                </option>
+                            {% endfor %}
+                        </select>
+                        <p class="field__hint">
+                            Applies to the Scientific Slide Deck. The generated deck inherits the
+                            template's theme, fonts and slide layouts, and downloads as a .pptx.
+                        </p>
                     </div>
+
+                    {% if not templates %}
+                        <div class="alert alert--amber">
+                            {{ icons.icon("alert-circle", 20) }}
+                            <div class="flex-1">
+                                <div class="alert__title">No brand template uploaded</div>
+                                <div class="alert__body">
+                                    <p>Decks will use the default PowerPoint theme. Upload a
+                                       <strong>.pptx</strong> or <strong>.potx</strong> below to
+                                       brand them.</p>
+                                </div>
+                            </div>
+                        </div>
+                    {% endif %}
+
+                    {# Associated with the separate multipart form declared below — HTML
+                       forms cannot nest, so the `form=` attribute wires them together. #}
                     <div class="field">
-                        <label class="field__label">Brand Guidelines Document (PDF)</label>
+                        <label class="field__label" for="templateFile">
+                            Upload a new template (.pptx / .potx)
+                        </label>
                         <div class="input-group">
-                            <input class="input" placeholder="No file selected" readonly>
-                            <a href="{{ url_for('upload') }}" class="btn btn--primary">
+                            <input class="input" type="file" name="template" id="templateFile"
+                                   form="brandUploadForm" accept=".pptx,.potx">
+                            <button type="submit" class="btn btn--primary" form="brandUploadForm">
                                 {{ icons.icon("upload", 16) }} Upload
-                            </a>
+                            </button>
                         </div>
+                        <p class="field__hint">
+                            Stored against this engagement, checksummed and logged like any other
+                            upload. Existing slides in the file are discarded — only the theme and
+                            layouts are used.
+                        </p>
                     </div>
-                    <p class="field__hint">Uploaded brand assets make generated materials immediately field-ready.</p>
                 </div>
             </div>
         </div>
@@ -184,13 +236,35 @@
                     </div>
                 </div>
 
+                {% if generated.is_deck %}
+                    <div class="alert alert--{{ 'green' if generated.brand_template else 'amber' }} mt-4">
+                        {{ icons.icon("presentation", 20) }}
+                        <div class="flex-1">
+                            <div class="alert__title">
+                                {% if generated.brand_template %}
+                                    Branded with {{ generated.brand_template }}
+                                {% else %}
+                                    Default PowerPoint theme
+                                {% endif %}
+                            </div>
+                            <div class="alert__body">
+                                <p>Downloads as a <strong>.pptx</strong>
+                                {%- if generated.brand_template %}, inheriting that template's
+                                    theme, fonts and slide layouts{% else %} — select a brand
+                                    template above to apply your own theme{% endif %}.</p>
+                            </div>
+                        </div>
+                    </div>
+                {% endif %}
+
                 <div class="btn-row mt-6">
                     <a href="{{ url_for('document_detail', run_id=generated.id) }}" class="btn btn--primary flex-1"
                        style="justify-content:center">
                         {{ icons.icon("file-text", 16) }} Open &amp; Refine
                     </a>
                     <a href="{{ url_for('download_document', run_id=generated.id) }}" class="btn btn--outline">
-                        {{ icons.icon("download", 16) }} Download
+                        {{ icons.icon("download", 16) }}
+                        Download {{ ".pptx" if generated.is_deck else ".md" }}
                     </a>
                 </div>
             </div>

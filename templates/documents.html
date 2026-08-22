@@ -65,11 +65,12 @@
                         <span>{{ item.size }}</span>
                         <span>{{ item.model }}{% if item.provider == 'offline' %} (offline){% endif %}</span>
                         <span>Round {{ item.round }}</span>
+                        <span class="badge badge--slate">{{ item.format }}</span>
                     </div>
                 </div>
                 <div class="doc-card__actions">
                     <a href="{{ url_for('download_document', run_id=item.id) }}" class="btn btn--primary">
-                        {{ icons.icon("download", 16) }} Download
+                        {{ icons.icon("download", 16) }} Download {{ item.format }}
                     </a>
                     <a href="{{ url_for('document_detail', run_id=item.id) }}" class="btn btn--outline">Preview</a>
                 </div>

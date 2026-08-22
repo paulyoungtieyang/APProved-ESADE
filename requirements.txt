@@ -1,6 +1,6 @@
 # APProved prototype — runtime dependencies
 #
-# Deliberately minimal. The app runs fully offline with just these four packages;
+# Deliberately minimal. The app runs fully offline with just these five packages;
 # live LLM calls go over the standard library's urllib, so no vendor SDK is needed
 # and there is no SDK version to drift.
 
@@ -8,6 +8,7 @@ Flask>=3.0,<4.0             # web framework + Jinja2 templating
 SQLAlchemy>=2.0.30,<3.0     # ORM over the SQLite audit/brief/generation store
 Werkzeug>=3.0,<4.0          # WSGI utilities, secure_filename, upload handling
 openpyxl>=3.1,<4.0          # XLSX ingestion on the upload page
+python-pptx>=1.0,<2.0       # read corporate .pptx/.potx templates, write branded decks
 
 # Optional — only if you prefer keys in a .env file instead of the shell
 python-dotenv>=1.0,<2.0

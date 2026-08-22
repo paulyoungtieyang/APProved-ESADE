@@ -30,13 +30,13 @@
                 <div class="dropzone" id="dropzone">
                     <span class="dropzone__icon">{{ icons.icon("upload", 48) }}</span>
                     <h3>Drop your files here, or browse</h3>
-                    <p>Supports CSV, XLSX, PDF, DOCX — max 100 MB per file</p>
+                    <p>Supports CSV, XLSX, PDF, DOCX, PPTX — max 100 MB per file</p>
 
                     <label class="btn btn--primary" for="fileInput">
                         {{ icons.icon("upload", 16) }} Browse Files
                     </label>
                     <input type="file" id="fileInput" name="files" class="file-input" multiple
-                           accept=".csv,.xlsx,.xls,.pdf,.docx,.doc,.txt">
+                           accept=".csv,.xlsx,.xls,.pdf,.docx,.doc,.txt,.pptx,.potx">
 
                     <div id="selectedFiles" class="mt-4" hidden></div>
                 </div>
@@ -51,6 +51,7 @@
                             <option value="efficacy">Efficacy endpoints</option>
                             <option value="demographics">Demographics &amp; baseline</option>
                             <option value="economics">Health economics / tender</option>
+                            <option value="brand">Brand template / guidelines</option>
                         </select>
                     </div>
                     <button type="submit" class="btn btn--primary" id="submitBtn" disabled
@@ -68,6 +69,7 @@
                     <li>• Patient demographics and baseline characteristics</li>
                     <li>• Efficacy endpoint tables with confidence intervals</li>
                     <li>• Health-economic and regional tender specifications</li>
+                    <li>• Corporate PowerPoint templates (.pptx / .potx) used to brand slide decks</li>
                 </ul>
             </div>
         </div>
@@ -96,6 +98,7 @@
                             <p class="file-row__meta">
                                 {{ file_size_label(file.size) }}
                                 {% if file.rows %} · {{ file.rows }} rows × {{ file.columns | length }} cols{% endif %}
+                                {% if file.note %} · {{ file.note }}{% endif %}
                                 · <code style="font-size:.6875rem">{{ file.checksum[:12] }}…</code>
                             </p>
                             {% if file.error %}

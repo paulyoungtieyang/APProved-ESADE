@@ -201,6 +201,11 @@ def summarise_efficacy(rows: list[dict]) -> dict[str, Any]:
 def classify(filename: str, columns: list[str]) -> str:
     """Guess a data category from the filename and header row."""
     haystack = (filename + " " + " ".join(columns)).lower()
+    # Brand assets first — a .pptx is never clinical data, whatever its name says.
+    if extension(filename) in {".pptx", ".potx"}:
+        return "brand"
+    if any(token in haystack for token in ("brand", "template", "corporate", "style guide")):
+        return "brand"
     if any(token in haystack for token in ("adverse", "safety", "event_type", "severity")):
         return "safety"
     if any(token in haystack for token in ("efficacy", "endpoint", "p_value", "metric")):

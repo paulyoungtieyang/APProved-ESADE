@@ -43,6 +43,20 @@ between the demo and a production system is explicit rather than implied.
 - RBAC across four roles. **Verified server-side**: MSL and Compliance Officer receive a 403
   from the generation endpoint, not merely a hidden button.
 
+### Brand templates → branded PowerPoint
+- Upload a corporate `.pptx` / `.potx` on the MSL Materials page (or via `/upload` with the
+  brand category). The file is validated with python-pptx on receipt — an unreadable one is
+  rejected and deleted rather than stored to fail later at export.
+- The picker shows what was actually read out of each template: layout count, aspect ratio
+  and theme fonts.
+- Generating a Scientific Slide Deck against a template produces a real `.pptx` that
+  inherits that template's theme, fonts, colours and slide layouts. Existing slides in the
+  template are dropped; only masters and layouts are used.
+- Which template a deck was built with is persisted on the run (`generation_run
+  .brand_template_id`), so re-downloading reproduces the same branded file.
+- **Verified**: two templates with different fonts and aspect ratios produce visibly
+  different decks; selecting "default theme" produces an unbranded one.
+
 ### Device-specific
 - Bolus calculator implementing carb dose + correction dose + CGM trend adjustment − insulin
   on board, with hypoglycaemia / ketone / falling-trend warnings. **Verified** against hand
@@ -54,24 +68,28 @@ between the demo and a production system is explicit rather than implied.
 
 | Area | Current state | What production needs |
 |---|---|---|
-| **Export format** | Markdown download | Real PDF and DOCX with the client's template, headers and pagination |
+| **Export format** | Slide decks export as real branded `.pptx`; everything else as Markdown | PDF and DOCX with the client's document template, headers and pagination |
 | **Policy news** | Static curated list | Live feed from EUR-Lex, MDCG and AEMPS |
 | **Resources** | Static list, no files | Document store with the actual guidance PDFs |
-| **Brand guidelines** | Upload controls present, unused | Apply `.potx` themes and brand rules to generated decks |
+| **Brand guidelines** | PowerPoint templates fully wired (upload → pick → branded export) | Brand *rules* beyond the deck theme: tone-of-voice, approved claim wording, logo placement |
 | **Literature search** | Database selected but not queried | PubMed / Embase integration feeding the evidence base |
 | **Translation** | Languages selected, output stays English | Per-language generation with terminology control |
 | **Judge scoring** | Schema exists (`judge_score`, `judge_rubric`), unused | Automated rubric pass before human review |
 | **Review rounds** | `ReviewRound` model exists, no UI | Client and expert review with accept / revise / decline |
 | **Auth** | Role switcher in the header | Real accounts, SSO, per-user audit identity |
-| **Multi-tenancy** | One engagement per browser session | Organisations, projects, member permissions |
+| **Multi-tenancy** | Two engagements per browser session (tool + demo) | Organisations, projects, member permissions |
 | **Storage** | Local SQLite + filesystem | Postgres, object storage, encryption at rest |
 
 ---
 
 ## Known constraints
 
-- **Session-scoped engagement.** One demo engagement per browser session, auto-seeded on
-  first load. `Engagement` supports many; there is no picker UI yet.
+- **Session-scoped engagements.** A landing page (`/`) routes into one of two workspaces —
+  a blank tool engagement or the pre-loaded CGM demo — each kept under its own session key
+  (`engagement_id_tool` / `engagement_id_demo`) so switching between them never mixes data.
+  `Engagement` supports many rows; there is still no picker UI for multiple *tool*
+  engagements, only the single one active in the session (with a "start new" action that
+  discards it).
 - **Section key encoding.** The section id is prefixed onto `resolved_prompt` as
   `"<section-id>::<prompt>"` because `GenerationRun` has no section column. It works and is
   queryable, but a dedicated column is the right fix before this grows.
@@ -86,9 +104,12 @@ between the demo and a production system is explicit rather than implied.
 
 ## Not a medical device
 
-The bolus calculator demonstrates a documented algorithm. It is not validated, not certified,
-and must not inform real dosing. The generated dossier text is a drafting aid requiring
-expert review before any regulatory use.
+The bolus calculator demonstrates a documented algorithm — it is the demo device's digital
+function, not a document the tool generates. It is not validated, not certified, and must
+not inform real dosing. It is also not reachable from the real tool workspace: the route
+redirects to the dashboard outside demo mode, and the sidebar link is hidden outside it too.
+The generated dossier text is a drafting aid requiring expert review before any regulatory
+use.
 
 ---
 
@@ -104,3 +125,18 @@ Each of these was executed against the running app, not assumed:
 - Submission wizard carries state across all five steps and writes to the brief.
 - Role cycling blocks generation for MSL and Compliance Officer with a 403.
 - Audit trail records twelve events for the seeded demo with no key material.
+- Every internal link and form target on all 12 pages, in both workspaces, resolves — crawled,
+  not spot-checked. No dead buttons, no empty `href`s, no orphaned readonly inputs.
+- Interactive controls driven in a real browser: collapsible section rows, provider→model
+  swapping with API-key reveal, the progressive 11-section generation walk, dropzone
+  drag/drop states, document filters, audit accordions and the mobile drawer.
+- A cold-start demo run generates 11 dossier sections + 4 MSL materials, refines one section
+  to round 4, and downloads all 15 documents: 14 Markdown files that open and parse, and one
+  12-slide `.pptx` that opens in python-pptx carrying the template's fonts and colours.
+- The three sample CSVs and the sample `.pptx` template all still open and parse.
+- A fresh session hitting `/dashboard` or any inner page directly redirects to `/`.
+- Entering the tool and the demo from two independent sessions shows zero cross-contamination:
+  the tool's upload/document lists stay empty while the demo's show its 3 files, and vice
+  versa; switching workspace and back re-uses each engagement rather than recreating it.
+- Direct navigation to `/bolus-calculator` from the tool workspace redirects to the dashboard
+  with an explanatory flash, and the sidebar hides the link outside demo mode.

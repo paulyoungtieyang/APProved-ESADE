@@ -5,13 +5,92 @@ Everything the UI lists (regulatory frameworks, dossier sections, MSL material
 types, policy feed, resources) lives here, plus the deterministic draft writers
 that ground each section in the numbers actually present in the uploaded files.
 
-The demo is configured for a Class IIb continuous glucose monitoring (CGM)
-system entering the EU under MDR 2017/745, launching in Spain.
+The demo device is a Class IIb continuous glucose monitoring (CGM) system
+entering the EU under MDR 2017/745 and launching in Spain. It is deliberately a
+*combination* product with two regulated functions:
+
+  - a HARDWARE function — the subcutaneous sensor and transmitter, and
+  - a DIGITAL function — the bolus calculator, software as a medical device.
+
+The two carry different classification rules, different standards and different
+evidence, and the point of the demo is that one ingestion of clinical data
+produces documentation covering both. `DEVICE_COMPONENTS` below is what makes
+that split explicit, and every dossier section draft addresses both functions.
 """
 
 from __future__ import annotations
 
 from typing import Any
+
+# ==========================================================================
+# Device components — the hardware / digital split the demo exists to show
+# ==========================================================================
+
+DEVICE_COMPONENTS = [
+    {
+        "id": "hardware",
+        "name": "CGM Sensor & Transmitter",
+        "kind": "Hardware function",
+        "icon": "activity",
+        "summary": "Subcutaneous glucose sensor with a rechargeable Bluetooth transmitter, "
+                   "measuring interstitial glucose continuously over a 14-day wear period.",
+        "classification": "Class IIb — MDR Annex VIII, Rule 15 "
+                          "(invasive device for continuous monitoring of vital physiological parameters)",
+        "standards": [
+            "EN ISO 15197 — glucose monitoring system accuracy",
+            "EN ISO 10993 — biological evaluation / biocompatibility",
+            "EN ISO 11137 — sterilisation of the sensor applicator",
+            "IEC 60601-1 / -1-2 — electrical safety and EMC",
+            "EN ISO 13485 — quality management system",
+        ],
+        "evidence": [
+            "Pivotal accuracy investigation against a laboratory reference method (MARD)",
+            "Sensor wear duration and survival analysis",
+            "Application-site adverse event reporting",
+            "Biocompatibility and sterilisation validation reports",
+        ],
+        "risks": [
+            "Application-site irritation and adhesive reactions",
+            "Calibration drift over the wear period",
+            "Signal loss or transmitter connectivity failure",
+        ],
+    },
+    {
+        "id": "digital",
+        "name": "Bolus Calculator",
+        "kind": "Digital function — software as a medical device",
+        "icon": "calculator",
+        "summary": "Dosing-support module inside the display application. Combines the "
+                   "carbohydrate dose, a glucose correction dose, a CGM trend adjustment and "
+                   "insulin-on-board subtraction to recommend a bolus.",
+        "classification": "Class IIb — MDR Annex VIII, Rule 11 "
+                          "(software providing information used to take therapeutic decisions)",
+        "standards": [
+            "IEC 62304 — medical device software lifecycle processes",
+            "IEC 82304-1 — health software product safety",
+            "IEC 62366-1 — usability engineering",
+            "MDCG 2019-11 — qualification and classification of software",
+            "MDCG 2019-16 — cybersecurity for medical devices",
+            "EU AI Act — transparency and human-oversight duties for algorithmic decision support",
+        ],
+        "evidence": [
+            "Algorithm verification against reference dose calculations",
+            "Human-factors validation of dose entry and confirmation (IEC 62366-1)",
+            "Use-related risk analysis covering entry error and dose stacking",
+            "Software unit, integration and system test records (IEC 62304 §5.5–5.7)",
+            "Cybersecurity risk assessment for the connected application",
+        ],
+        "risks": [
+            "Carbohydrate entry error propagating into the recommended dose",
+            "Dose stacking when insulin on board is not accounted for",
+            "Over-reliance on the recommendation without clinical judgement",
+            "Trend adjustment applied to an unreliable sensor reading",
+        ],
+    },
+]
+
+COMPONENT_BY_ID = {component["id"]: component for component in DEVICE_COMPONENTS}
+
 
 # ==========================================================================
 # Regulatory frameworks — MDR / Spain lead, since that is the demo scenario
@@ -187,27 +266,42 @@ METHODOLOGIES = [
 # Global Value Dossier sections
 # ==========================================================================
 
+# `covers` records which device functions each section documents, so the UI can
+# show at a glance that the hardware and the digital tool are both accounted for.
 DOSSIER_SECTIONS = [
     {"id": "exec-summary", "title": "Executive Summary",
-     "description": "High-level overview of the clinical value proposition"},
+     "description": "High-level overview of the clinical value proposition",
+     "covers": ["hardware", "digital"]},
     {"id": "device-description", "title": "Device Description & Intended Purpose",
-     "description": "MDR Annex II device description, classification and intended purpose"},
+     "description": "MDR Annex II description and classification of both device functions",
+     "covers": ["hardware", "digital"]},
     {"id": "disease-overview", "title": "Disease & Epidemiology",
-     "description": "Disease burden, prevalence and unmet needs in the launch market"},
+     "description": "Disease burden, prevalence and unmet needs in the launch market",
+     "covers": []},
     {"id": "clinical-efficacy", "title": "Clinical Performance Data",
-     "description": "Pivotal study results, endpoints and statistical analysis"},
+     "description": "Sensor accuracy plus bolus calculator algorithm verification",
+     "covers": ["hardware", "digital"]},
     {"id": "safety-profile", "title": "Safety & Tolerability",
-     "description": "Adverse events, safety profile and benefit-risk analysis"},
+     "description": "Device adverse events and software use-related risk",
+     "covers": ["hardware", "digital"]},
     {"id": "pharmacoeconomics", "title": "Health-Economic Analysis",
-     "description": "Cost-effectiveness, budget impact and economic value"},
+     "description": "Cost-effectiveness, budget impact and economic value",
+     "covers": []},
     {"id": "qol-outcomes", "title": "Quality of Life Outcomes",
-     "description": "Patient-reported outcomes and usability assessments"},
+     "description": "Patient-reported outcomes and usability of both functions",
+     "covers": ["hardware", "digital"]},
     {"id": "comparative-effectiveness", "title": "Comparative Effectiveness",
-     "description": "Comparison against the current standard of care and competitors"},
+     "description": "Comparison against standard of care and competitor systems",
+     "covers": ["hardware", "digital"]},
     {"id": "target-population", "title": "Target Population & Positioning",
-     "description": "Patient segmentation and treatment positioning"},
+     "description": "Patient segmentation and treatment positioning",
+     "covers": []},
+    {"id": "software-lifecycle", "title": "Software Lifecycle & Cybersecurity",
+     "description": "IEC 62304 lifecycle, cybersecurity and AI Act duties for the bolus calculator",
+     "covers": ["digital"]},
     {"id": "regulatory-status", "title": "Regulatory Status & Compliance",
-     "description": "MDR conformity route, notified body status and market notifications"},
+     "description": "Conformity route for both functions, notified body and market notification",
+     "covers": ["hardware", "digital"]},
 ]
 
 SECTION_BY_ID = {section["id"]: section for section in DOSSIER_SECTIONS}
@@ -508,6 +602,16 @@ def build_section_prompt(section_id: str, brief: dict, stats: dict, overlay: str
     markets = ", ".join(brief.get("target_markets") or ["Spain"])
     languages = ", ".join(brief.get("languages") or ["English"])
 
+    covers = section.get("covers") or []
+    component_lines = []
+    for component_id in covers:
+        component = COMPONENT_BY_ID[component_id]
+        component_lines.append(
+            f"- {component['kind']} — {component['name']}: {component['summary']} "
+            f"Classified {component['classification']}. "
+            f"Standards: {', '.join(component['standards'][:3])}."
+        )
+
     lines = [
         "# Layer 1 — Client baseline (from the signed brief)",
         f"Device / therapeutic area: {brief.get('therapeutic_area', 'Diagnostics & Monitoring')}",
@@ -525,6 +629,19 @@ def build_section_prompt(section_id: str, brief: dict, stats: dict, overlay: str
         "Cite only figures present in the uploaded dataset summary below. "
         "Do not invent endpoints, comparators or citations.",
         "Structure the output as Markdown with a level-2 heading and short subsections.",
+    ]
+
+    if component_lines:
+        lines += [
+            "",
+            "## Device functions this section must cover",
+            "The product combines a hardware function and a digital function (software as a "
+            "medical device). Address each explicitly under its own subheading — do not "
+            "collapse them, and do not apply hardware endpoints to the software.",
+            *component_lines,
+        ]
+
+    lines += [
         "",
         "## Dataset summary available to you",
         _dataset_digest(stats),
@@ -590,23 +707,34 @@ def draft_section(section_id: str, brief: dict, stats: dict, overlay: str = "") 
     builders = {
         "exec-summary": lambda: f"""## Executive Summary
 
-The device is a Class IIb continuous glucose monitoring (CGM) system with an integrated
-bolus calculator, submitted for conformity assessment under {frameworks} and prepared for
-launch in {primary_market}.
+The product is a Class IIb continuous glucose monitoring (CGM) system submitted for
+conformity assessment under {frameworks} and prepared for launch in {primary_market}. It
+comprises **two regulated functions** documented together in this dossier:
 
-**Value proposition**
+- a **hardware function** — the subcutaneous sensor and transmitter, and
+- a **digital function** — the bolus calculator, software as a medical device.
+
+**Hardware function — value proposition**
 
 - Mean absolute relative difference (MARD) of **{mard}%** across {patients} evaluable
   patients, meeting the pre-specified primary accuracy endpoint.
 - Hypoglycaemia detection rate of {endpoint('Hypoglycemia_Detection_Rate')}.
 - Time-in-range improvement of {endpoint('Time_In_Range_Improvement')} versus baseline.
 - Sensor wear duration of {wear} days per application, reducing consumable burden.
-- Integrated bolus calculator delivers dosing support without a separate application.
+
+**Digital function — value proposition**
+
+- Dosing support is delivered inside the primary display application rather than through a
+  separate companion app, removing a hand-off step at mealtimes.
+- The calculator consumes the live sensor trend, which a fingerstick-based calculator
+  cannot do, and subtracts insulin on board to reduce dose stacking.
+- Developed under IEC 62304 with human-factors validation per IEC 62366-1.
 
 **Regulatory position**
 
-Technical documentation is assembled against MDR Annex II, with the clinical evaluation
-report structured per Annex XIV and MDCG 2020-13. Target markets: {markets}.""",
+Technical documentation is assembled against MDR Annex II for both functions, with the
+clinical evaluation report structured per Annex XIV and MDCG 2020-13, and the software
+qualified under MDCG 2019-11. Target markets: {markets}.""",
 
         "device-description": lambda: f"""## Device Description & Intended Purpose
 
@@ -614,20 +742,34 @@ report structured per Annex XIV and MDCG 2020-13. Target markets: {markets}.""",
 diabetes mellitus aged 18 years and over, to support glycaemic management decisions
 including insulin dosing via the integrated bolus calculator.
 
-**Classification.** Class IIb under MDR 2017/745 Annex VIII, Rule 11 (software providing
-information used to take decisions with diagnosis or therapeutic purposes) in combination
-with the invasive sensor rule.
+The product is a combination of a hardware function and a digital function. Each is
+classified on its own rule and carries its own evidence, and both are covered here.
 
-**Principal components**
+### Hardware function — sensor and transmitter
 
 - Subcutaneous glucose sensor with a {wear}-day labelled wear duration.
 - Rechargeable transmitter with Bluetooth Low Energy connectivity.
-- Display application incorporating trend arrows, predictive alerts and the bolus
-  calculator module (developed under IEC 62304).
+- **Classification:** Class IIb, MDR Annex VIII **Rule 15** — invasive device intended for
+  continuous monitoring of vital physiological parameters.
+- **Applicable standards:** EN ISO 15197 (accuracy), EN ISO 10993 (biocompatibility),
+  EN ISO 11137 (sterilisation), IEC 60601-1 / -1-2 (electrical safety and EMC).
 
-**Conformity route.** Annex IX quality management system assessment plus technical
-documentation review by the notified body, supported by EN ISO 13485, ISO 14971
-risk management and IEC 62366-1 usability engineering files.""",
+### Digital function — bolus calculator
+
+- Dosing-support module within the display application, alongside trend arrows and
+  predictive alerts.
+- Computes a carbohydrate dose and a glucose correction dose, applies a CGM trend
+  adjustment, then subtracts insulin on board.
+- **Classification:** Class IIb, MDR Annex VIII **Rule 11** — software providing
+  information used to take decisions with therapeutic purposes. Qualified as a medical
+  device in its own right under MDCG 2019-11.
+- **Applicable standards:** IEC 62304 (software lifecycle), IEC 82304-1 (health software),
+  IEC 62366-1 (usability), MDCG 2019-16 (cybersecurity).
+- The calculator issues a recommendation only; it does not deliver insulin.
+
+**Conformity route.** A single Annex IX quality management system assessment plus technical
+documentation review by the notified body covering both functions, supported by
+EN ISO 13485 and ISO 14971 risk management files.""",
 
         "disease-overview": lambda: f"""## Disease & Epidemiology
 
@@ -650,6 +792,11 @@ diabetes representation, consistent with the intended-use population.""",
 
         "clinical-efficacy": lambda: f"""## Clinical Performance Data
 
+Performance evidence is presented separately for the two device functions, since they are
+assessed against different endpoints.
+
+### Hardware function — sensor accuracy
+
 **Study design.** Prospective, single-arm, multi-centre accuracy investigation. Sensor
 glucose readings were compared against a laboratory reference method (YSI) across a
 {wear}-day wear period in {patients} evaluable patients.
@@ -668,9 +815,26 @@ glucose readings were compared against a laboratory reference method (YSI) acros
 - Sensor longevity: {endpoint('Sensor_Longevity')}
 - System reliability: {endpoint('System_Reliability')}
 
-**Interpretation.** Accuracy performance sits within the range reported for contemporary
+### Digital function — bolus calculator verification
+
+The calculator is not evaluated by MARD. Its performance evidence is verification and
+human-factors data rather than a clinical accuracy endpoint:
+
+- **Algorithm verification.** Computed doses were checked against independently derived
+  reference calculations across the specified input ranges, including boundary conditions
+  for carbohydrate entry, correction dose and insulin on board.
+- **Trend-adjustment behaviour.** Adjustment is applied only when the sensor reading meets
+  the reliability criteria used for display, so the calculator inherits the accuracy
+  characterised above rather than asserting an independent one.
+- **Human-factors validation.** Conducted per IEC 62366-1 against the use scenarios for
+  dose entry, review and confirmation, with no unresolved critical use errors.
+- **Dose-stacking control.** Insulin on board is subtracted from every recommendation;
+  this is a verified requirement, not a configurable preference.
+
+**Interpretation.** Sensor accuracy sits within the range reported for contemporary
 CE-marked CGM systems, and the hypoglycaemia detection result supports the alerting claims
-made in the instructions for use.""",
+in the instructions for use. The calculator's evidence supports a decision-support claim
+only — no autonomous dosing claim is made.""",
 
         "safety-profile": lambda: f"""## Safety & Tolerability
 
@@ -682,14 +846,32 @@ the investigation, of which {_fmt(safety.get('serious'))} were serious.
 
 {chr(10).join(f"- {name}: {count} event(s)" for name, count in (safety.get('by_type') or {}).items()) or "- No adverse events recorded in the uploaded dataset."}
 
-**Benefit-risk conclusion.** Observed events were predominantly mild-to-moderate, localised
-to the application site or related to calibration handling, and all were managed with
-routine measures. No device deficiency led to a serious deterioration in health. The
-benefit-risk determination under MDR Annex I Chapter I remains favourable.
+### Hardware function — device-related risk
+
+Observed events were predominantly mild-to-moderate, localised to the application site or
+related to calibration handling, and all were managed with routine measures. No device
+deficiency led to a serious deterioration in health.
 
 **Risk controls.** Adhesive alternatives are provided for application-site reactions;
-calibration drift is mitigated through the firmware algorithm and in-app prompts; the
-bolus calculator applies insulin-on-board subtraction to reduce stacking risk.""",
+calibration drift is mitigated through the firmware algorithm and in-app prompts.
+
+### Digital function — use-related risk
+
+Software risk is assessed as use-related rather than as adverse events, per ISO 14971 and
+IEC 62366-1. The dominant hazards and their controls:
+
+- **Carbohydrate entry error** → input range limits, an explicit confirmation step, and the
+  computed breakdown shown before acceptance.
+- **Dose stacking** → mandatory insulin-on-board subtraction.
+- **Dosing on an unreliable reading** → the trend adjustment is suppressed when sensor
+  reliability criteria are not met.
+- **Over-reliance on the recommendation** → labelling and in-app text state that the output
+  is decision support requiring clinical judgement.
+- **Hypoglycaemia and ketone thresholds** → explicit warnings raised before a dose is
+  recommended.
+
+**Benefit-risk conclusion.** Taking both functions together, the benefit-risk determination
+under MDR Annex I Chapter I remains favourable.""",
 
         "pharmacoeconomics": lambda: f"""## Health-Economic Analysis
 
@@ -718,17 +900,24 @@ dataset and are mapped directly to the scoring criteria in the tender annex.""",
 **Patient-reported outcomes.** Patient satisfaction scored
 {endpoint('Patient_Satisfaction_Score')} on the study instrument.
 
-**Contributing factors**
+### Hardware function — contributing factors
 
 - Elimination of routine fingerstick testing across the {wear}-day wear period.
 - Predictive alerts reducing anxiety around nocturnal hypoglycaemia.
-- Integrated bolus calculation removing manual arithmetic at mealtimes.
 - Calibration burden of {endpoint('Calibration_Frequency')}, considered acceptable by
   participants.
 
-**Usability evidence.** Human-factors validation was conducted per IEC 62366-1. Use-related
-risk analysis covers sensor application, alert interpretation and bolus calculator entry,
-with no unresolved critical use errors.""",
+### Digital function — contributing factors
+
+- Integrated bolus calculation removes manual arithmetic at mealtimes.
+- The dose breakdown (carbohydrate, correction, trend, insulin on board) is shown before
+  confirmation, supporting understanding rather than blind acceptance.
+- No app switching between glucose review and dose calculation.
+
+**Usability evidence.** Human-factors validation was conducted per IEC 62366-1 across both
+functions. Use-related risk analysis covers sensor application and alert interpretation for
+the hardware, and dose entry, review and confirmation for the calculator, with no
+unresolved critical use errors.""",
 
         "comparative-effectiveness": lambda: f"""## Comparative Effectiveness
 
@@ -736,24 +925,67 @@ with no unresolved critical use errors.""",
 available in the {primary_market} market, plus conventional self-monitoring of blood
 glucose as the baseline standard of care.
 
-**Positioning against CGM comparators**
+### Hardware function
 
 - Accuracy: MARD {mard}% is comparable with the leading marketed systems.
 - Hypoglycaemia detection: {endpoint('Hypoglycemia_Detection_Rate')}, supporting the
   alerting claim.
-- Dosing support: bolus calculation is integrated in the primary display application
-  rather than requiring a separate companion app.
 - Wear duration: {wear} days per sensor.
+- Versus self-monitoring: continuous trend visibility rather than discrete measurements,
+  a time-in-range improvement of {endpoint('Time_In_Range_Improvement')} and a
+  {endpoint('Nocturnal_Hypoglycemia_Reduction')} reduction in nocturnal hypoglycaemia.
 
-**Positioning against self-monitoring**
+### Digital function
 
-- Continuous trend visibility versus discrete measurements.
-- Time-in-range improvement of {endpoint('Time_In_Range_Improvement')}.
-- Nocturnal hypoglycaemia reduction of {endpoint('Nocturnal_Hypoglycemia_Reduction')}.
+- Dosing support is integrated in the primary display application; several comparator
+  systems require a separate companion app or a third-party calculator.
+- The calculator consumes the live CGM trend. A standalone or fingerstick-based calculator
+  has no trend input and cannot make this adjustment.
+- Insulin-on-board subtraction is mandatory rather than optional.
+- This is the principal point of differentiation: the combined hardware-plus-software
+  offering, documented under a single conformity assessment.
 
 **Evidence caveat.** No head-to-head randomised comparison has been conducted. Comparative
-statements are indirect and are labelled as such throughout the dossier, per MDCG 2020-5
-expectations on equivalence and comparative claims.""",
+statements — for both functions — are indirect and are labelled as such throughout the
+dossier, per MDCG 2020-5 expectations on equivalence and comparative claims.""",
+
+        "software-lifecycle": lambda: f"""## Software Lifecycle & Cybersecurity
+
+This section applies to the **digital function** — the bolus calculator — which is a
+medical device in its own right under MDR Annex VIII Rule 11 and MDCG 2019-11.
+
+**Software safety classification.** Class C under IEC 62304: a failure of the dose
+recommendation could contribute to serious injury through hypoglycaemia or persistent
+hyperglycaemia.
+
+**Lifecycle records (IEC 62304)**
+
+- §5.1 Software development plan, including the SOUP inventory.
+- §5.2–5.4 Requirements, architectural design and detailed design, traced to the intended
+  purpose and to the risk controls in the ISO 14971 file.
+- §5.5–5.7 Unit, integration and system test records covering the dose calculation across
+  its specified input ranges and boundary conditions.
+- §6 Maintenance process, with a defined route for post-release changes.
+- §7 Risk management for software, cross-referenced to the use-related risk analysis.
+- §8 Configuration management and §9 problem resolution.
+
+**Cybersecurity (MDCG 2019-16)**
+
+- Threat model for the Bluetooth link between transmitter and display application.
+- Authenticated pairing and encrypted transport for glucose data.
+- Integrity protection for the calculator's configuration parameters (carbohydrate ratio,
+  correction factor, target), since altering them silently changes every recommendation.
+- Coordinated vulnerability disclosure route and a patching commitment stated in the PMS
+  plan.
+
+**EU AI Act considerations.** The calculator is deterministic rule-based software rather
+than a learning system, which limits the obligations that attach. Transparency and
+human-oversight duties are nonetheless addressed: the dose breakdown is displayed before
+confirmation, the recommendation is labelled as decision support, and the user retains the
+final decision.
+
+**Usability (IEC 62366-1).** Use specification, user interface specification, use-related
+risk analysis and summative evaluation, all covering dose entry, review and confirmation.""",
 
         "target-population": lambda: f"""## Target Population & Positioning
 
@@ -776,25 +1008,38 @@ indication extension would require a separate clinical investigation and Annex I
         "regulatory-status": lambda: f"""## Regulatory Status & Compliance
 
 **Conformity route.** MDR 2017/745, Class IIb, Annex IX (QMS + technical documentation
-assessment) with notified body involvement.
+assessment) with notified body involvement. Both device functions are covered by a single
+assessment, but each is classified on its own rule:
+
+| Function | Classification rule | Class |
+|---|---|---|
+| CGM sensor and transmitter | Annex VIII **Rule 15** — invasive, continuous monitoring of vital physiological parameters | IIb |
+| Bolus calculator software | Annex VIII **Rule 11** — software informing therapeutic decisions | IIb |
 
 **Documentation status**
 
-- Annex II technical documentation: assembled.
+- Annex II technical documentation: assembled, covering both functions.
 - Annex XIV clinical evaluation report: drafted against MDCG 2020-13.
-- Annex I GSPR checklist: complete with evidence cross-references.
-- Annex III post-market surveillance plan: drafted, PSUR on an annual cycle.
-- EUDAMED actor registration and UDI assignment: in progress.
+- Software qualification rationale per MDCG 2019-11: documented.
+- IEC 62304 lifecycle file (Class C): complete — see the Software Lifecycle section.
+- Annex I GSPR checklist: complete with evidence cross-references, including GSPR 17
+  (electronic programmable systems and software).
+- Annex III post-market surveillance plan: drafted, PSUR on an annual cycle, with real-world
+  accuracy monitoring and software problem trending.
+- EUDAMED actor registration and UDI assignment: in progress. The software carries its own
+  UDI-DI where placed on the market as a distinct unit.
 
 **{primary_market} market entry**
 
 - AEMPS comunicación de puesta en el mercado to be filed on receipt of the CE certificate.
-- Spanish-language instructions for use and labelling prepared.
+- Spanish-language instructions for use, labelling and in-application text prepared —
+  the language duty extends to the calculator's user interface.
 - Regional tender dossiers aligned to CCAA purchasing criteria.
 
 **Applicable frameworks selected for this engagement:** {frameworks}.
 
-**Standards conformity.** EN ISO 13485, ISO 14971, IEC 62304, IEC 62366-1, ISO 15197.""",
+**Standards conformity.** EN ISO 13485, ISO 14971, EN ISO 15197, EN ISO 10993,
+IEC 60601-1/-1-2 (hardware); IEC 62304, IEC 82304-1, IEC 62366-1, MDCG 2019-16 (software).""",
     }
 
     builder = builders.get(section_id)
@@ -827,43 +1072,69 @@ def draft_msl_material(material_id: str, brief: dict, stats: dict, config: dict)
               f"MDR 2017/745 conformity route.\n\n---\n")
 
     if material_id == "slide-deck":
+        # Each `## ` heading becomes one slide and each `- ` line one bullet when this
+        # is exported to PowerPoint (see core/deck.py), so keep the structure flat.
         body = f"""
-## Slide 1 — Title
-Continuous Glucose Monitoring with Integrated Bolus Calculation: pivotal performance data.
+## The unmet need
+- Hypoglycaemia is under-detected by intermittent self-monitoring, particularly overnight
+- Manual dose calculation adds avoidable arithmetic error at mealtimes
+- Two functions address this: a continuous sensor, and integrated dosing support
 
-## Slide 2 — Unmet need
-Hypoglycaemia remains under-detected with intermittent self-monitoring, particularly
-overnight, and manual dose calculation adds avoidable error.
+## Device overview — two regulated functions
+- Hardware: subcutaneous CGM sensor and transmitter (MDR Annex VIII, Rule 15)
+- Digital: bolus calculator, software as a medical device (MDR Annex VIII, Rule 11)
+- Both covered by a single Class IIb conformity assessment
 
-## Slide 3 — Study design
-Prospective single-arm accuracy investigation; {_fmt(study.get('patients'))} patients;
-{_fmt(study.get('mean_wear_days'))}-day wear period; laboratory reference comparison.
+## Study design
+- Prospective, single-arm, multi-centre accuracy investigation
+- {_fmt(study.get('patients'))} evaluable patients
+- {_fmt(study.get('mean_wear_days'))}-day wear period
+- Comparison against a laboratory reference method
 
-## Slide 4 — Primary endpoint
-MARD {mard}% — primary accuracy endpoint met.
+## Primary endpoint — sensor accuracy
+- Mean absolute relative difference (MARD): {mard}%
+- Pre-specified primary accuracy endpoint met
+- Comparable with contemporary CE-marked CGM systems
 
-## Slide 5 — Hypoglycaemia detection
-Detection rate {endpoint('Hypoglycemia_Detection_Rate')}; nocturnal hypoglycaemia reduced by
-{endpoint('Nocturnal_Hypoglycemia_Reduction')}.
+## Hypoglycaemia detection
+- Detection rate: {endpoint('Hypoglycemia_Detection_Rate')}
+- Nocturnal hypoglycaemia reduced by {endpoint('Nocturnal_Hypoglycemia_Reduction')}
+- Supports the alerting claims made in the instructions for use
 
-## Slide 6 — Glycaemic control
-Time in range improved by {endpoint('Time_In_Range_Improvement')}; glucose variability
-reduced by {endpoint('Glucose_Variability_Reduction')}.
+## Glycaemic control
+- Time in range improved by {endpoint('Time_In_Range_Improvement')}
+- Glucose variability reduced by {endpoint('Glucose_Variability_Reduction')}
+- Sensor longevity: {endpoint('Sensor_Longevity')}
 
-## Slide 7 — Safety
-{_fmt(safety.get('total'))} adverse events, {_fmt(safety.get('serious'))} serious,
-{_fmt(safety.get('resolution_pct'))}% resolved.
+## Safety profile
+- {_fmt(safety.get('total'))} adverse events recorded
+- {_fmt(safety.get('serious'))} serious
+- {_fmt(safety.get('resolution_pct'))}% resolved without sequelae
+- Predominantly application-site or calibration-related
 
-## Slide 8 — Dosing support
-Bolus calculator applies carbohydrate ratio, correction factor, CGM trend adjustment and
-insulin-on-board subtraction.
+## Digital function — bolus calculator
+- Carbohydrate dose plus glucose correction dose
+- CGM trend adjustment, which a fingerstick calculator cannot make
+- Insulin-on-board subtraction to reduce dose stacking
+- Decision support only — the device does not deliver insulin
 
-## Slide 9 — Patient experience
-Satisfaction {endpoint('Patient_Satisfaction_Score')}; calibration burden
-{endpoint('Calibration_Frequency')}.
+## Digital function — evidence and controls
+- Algorithm verified against reference calculations across the input range
+- Human-factors validation per IEC 62366-1, no unresolved critical use errors
+- Developed under IEC 62304 as Class C software
+- Cybersecurity assessed per MDCG 2019-16
 
-## Slide 10 — Summary and references
-Field-ready summary with full citation list appended.
+## Patient experience
+- Satisfaction: {endpoint('Patient_Satisfaction_Score')}
+- Calibration burden: {endpoint('Calibration_Frequency')}
+- No fingerstick testing across the wear period
+- No app switching between glucose review and dose calculation
+
+## Summary
+- Primary accuracy endpoint met at MARD {mard}%
+- Hypoglycaemia detection supports the alerting claim
+- Hardware and software documented under one conformity assessment
+- Comparative statements are indirect and labelled as such
 """
     elif material_id == "medical-summary":
         body = f"""

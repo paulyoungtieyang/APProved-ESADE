@@ -22,8 +22,16 @@ pip install -r requirements.txt
 python3 app.py
 ```
 
-The app opens at **http://localhost:5001** and seeds the demo engagement on first load —
-sample CGM dataset, brief, and MDR/AEMPS framework selection are already in place.
+The app opens at **http://localhost:5001** on a landing page with two paths:
+
+- **Open the Tool** — a blank engagement. Give it a client name, and you get an empty
+  workspace: no files, no brief, nothing pre-loaded.
+- **View the CGM Demo** — the pre-loaded Class IIb CGM device engagement: sample dataset,
+  brief, and MDR/AEMPS framework selection already in place.
+
+The two are separate engagements end to end — uploads, briefs and generated documents in
+one are never visible from the other. A badge in the header always shows which one you're
+in, and it doubles as a "switch workspace" control back to the landing page.
 
 No API key. No internet. No configuration. Set `PORT` to use a different port, or
 `OPEN_BROWSER=0` to stop it launching a browser tab.
@@ -48,22 +56,28 @@ languages, with every claim traceable back to the file and prompt that produced 
 
 ## The interface
 
-Ten pages behind a persistent sidebar, matching the Figma prototype 1:1.
+A landing page, then a persistent sidebar with the working pages, matching the Figma
+prototype 1:1.
 
 | Page | Path | What it does |
 |---|---|---|
-| Dashboard | `/` | Setup checklist, live stats from the parsed dataset, quick actions, recent activity |
+| Landing | `/` | Choose the Tool (blank) or the Demo (CGM · MDR · Spain) — the only page with no sidebar |
+| Start a new engagement | `/enter/tool` | One-field intake (client name + consent) that creates the blank workspace |
+| Dashboard | `/dashboard` | Setup checklist, live stats from the parsed dataset, quick actions, recent activity |
 | Upload Clinical Data | `/upload` | Drag-and-drop CSV / XLSX / PDF / DOCX, SHA-256 checksums, parsed cohort + safety summary |
 | Regulations | `/regulations` | Framework picker (MDR, AEMPS, MDCG, IVDR, FDA, MHRA, PMDA, NMPA, TGA) written back to the brief |
 | Policy News | `/policy-news` | Filterable regulatory feed focused on MDR and Spanish market access |
 | Global Value Dossier | `/global-dossier` | Section-by-section generation with live progress, three-layer prompt composition |
-| MSL Materials | `/msl-material` | Slide decks, medical summaries, scientific FAQs, email templates |
-| Bolus Calculator | `/bolus-calculator` | The demo device's dosing-support module, documented as an IEC 62304 component |
-| Document Library | `/documents` | Everything generated, filtered by type / market / language, with download |
+| MSL Materials | `/msl-material` | Slide decks, medical summaries, scientific FAQs, email templates. Upload a corporate `.pptx`/`.potx` here to brand generated decks |
+| Bolus Calculator | `/bolus-calculator` | Demo only. Not a generated document — the demo device's own digital (dosing-support) function, documented as an IEC 62304 component alongside the hardware sensor |
+| Document Library | `/documents` | Everything generated, filtered by type / market / language. Decks download as `.pptx`, everything else as `.md` |
 | Resources | `/resources` | Regulations, guidance, standards and templates the drafts cite |
 | Submit | `/submission` | Five-step wizard: data → markets → languages → AI instructions → review |
 | Audit Trail | `/audit` | Append-only event log with full payloads |
 | Settings | `/settings` | Role-based access control matrix and provider key status |
+
+The header badge next to the role switcher always names the active workspace and doubles
+as a link back to the landing page (`POST /switch-workspace`).
 
 ---
 
@@ -79,6 +93,22 @@ Every draft is composed from **three prompt layers**, kept visibly separate:
 
 The resolved prompt is stored with the output, so any claim can be traced back to the exact
 text sent to the model. Refinements increment a round counter rather than overwriting history.
+
+### Branded PowerPoint output
+
+Upload your corporate `.pptx` or `.potx` on the MSL Materials page. The file is validated on
+receipt — anything PowerPoint can't open is rejected rather than stored — and the picker
+shows what was actually read from it (layout count, aspect ratio, theme fonts).
+
+Generating a **Scientific Slide Deck** against a template produces a real `.pptx` that
+inherits that template's theme, fonts, colours and slide layouts. Existing slides in the
+template are discarded; only the masters and layouts are used, so the deck comes out looking
+like the company's own rather than needing to be re-styled by hand.
+
+Which template a deck was built with is recorded against the generation run, so
+re-downloading later reproduces the same branded file. The demo ships with a stand-in
+corporate template (`sample_data/brand/`) so the path works out of the box; regenerate it
+with `python3 sample_data/brand/make_sample_template.py`.
 
 ### Offline by default
 
@@ -103,17 +133,29 @@ or keep in sync.
 
 ## The demo
 
+A Class IIb continuous glucose monitoring system with **two regulated functions**, each
+classified on its own MDR rule — the point of the demo is that one clinical dataset produces
+regulatory documentation covering both:
+
 | | |
 |---|---|
-| Device | Class IIb continuous glucose monitoring system with integrated bolus calculator |
+| Hardware function | CGM sensor & transmitter — MDR Annex VIII Rule 15 |
+| Digital function | Bolus calculator (software as a medical device) — MDR Annex VIII Rule 11 |
 | Regulation | EU MDR 2017/745 (Annex II, Annex XIV, Annex III) + AEMPS |
 | Launch market | Spain, then wider EU |
 | Languages | Spanish (Castellano), English |
 | Dataset | 20 patients · 10 adverse events · 10 statistical endpoints |
 | Headline figures | Mean MARD 9.6% · 94.2% hypoglycaemia detection · 13.8-day wear |
 
+Every dossier section documents both functions explicitly rather than collapsing them —
+see the "Software Lifecycle & Cybersecurity" section for the digital function's IEC 62304
+and MDCG 2019-16 evidence specifically. The **Bolus Calculator** page itself is not a
+generated document — it's the demo device's own digital function, kept out of the real
+tool workspace entirely and out of its sidebar.
+
 Sample files live in `sample_data/`. Reset the demo from the button at the foot of the
-dashboard — it rebuilds the engagement and discards generated work.
+dashboard — it rebuilds the engagement and discards generated work, without touching the
+tool workspace.
 
 To use your own data, drop a CSV or XLSX on `/upload`. The parser detects the category from
 the header row and recomputes every statistic the drafts cite.
@@ -148,10 +190,11 @@ core/
   dataset.py            CSV/XLSX ingestion, checksums, derived statistics
   content.py            Reference data + the deterministic offline drafting engine
   llm.py                Provider layer (offline / Anthropic / OpenAI / Google)
+  deck.py               PowerPoint generation against an uploaded brand template
   gates.py              Consent and data-quality gates
 templates/              Jinja2 pages; base.html is the sidebar shell, _icons.html the icon set
 static/css/style.css    Design system ported from the Figma tokens
-sample_data/            Demo CGM dataset
+sample_data/            Demo CGM dataset + a stand-in corporate deck template
 storage/                SQLite database and uploaded files (gitignored)
 docs/                   Architecture and interface specifications
 ```

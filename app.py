@@ -4,9 +4,16 @@ APProved — medical writing platform prototype.
 
     python3 app.py      →  http://localhost:5001
 
-A Flask port of the APProved Figma prototype: dashboard shell with a sidebar,
-ten working pages, and a demo engagement pre-loaded with continuous glucose
-monitoring (CGM) pivotal study data on an EU MDR / Spain launch track.
+A Flask port of the APProved Figma prototype: a landing page that routes into one
+of two completely separate workspaces —
+
+  - the TOOL:  a blank engagement, for real use, with nothing pre-loaded, or
+  - the DEMO:  a pre-loaded continuous glucose monitoring (CGM) engagement,
+               EU MDR / Spain launch track, for exploring what the tool produces.
+
+The two are never mixed: each keeps its own engagement (and therefore its own
+uploads, brief and generated documents) behind its own session key, so entering
+one never shows data from the other.
 
 Runs entirely offline. Supplying an API key on the generation pages switches the
 same prompts over to a live Anthropic / OpenAI / Google model.
@@ -26,9 +33,10 @@ from flask import (
 )
 from sqlalchemy.orm import sessionmaker
 
-from core import content, dataset, llm
+from core import content, dataset, deck, llm
 from core.audit import log_event, get_engagement_trail
 from core.briefs import brief_as_dict, create_brief_v1, get_latest_brief
+from core.gates import consent_gate
 from core.models import (
     AuditEvent, BriefVersion, Engagement, GenerationRun, UploadedFile, init_db
 )
@@ -59,16 +67,30 @@ SAMPLE_FILES = [
     ("efficacy_analysis.csv", "efficacy"),
 ]
 
+# The demo ships a stand-in corporate deck template so the "generate a branded
+# slide deck" path is exercised end to end without the user having to find one.
+SAMPLE_BRAND_TEMPLATE = os.path.join("brand", "acme_medical_corporate_template.pptx")
+
+# Routes reachable before a workspace has been chosen. Everything else redirects
+# to the landing page until the visitor picks "the tool" or "the demo" — see
+# require_workspace() below.
+PUBLIC_ENDPOINTS = {"landing", "enter_tool", "enter_demo", "static"}
+
+# `demo_only` items are the CGM device's own illustrative features rather than
+# general tool functionality — the bolus calculator is not something generated
+# by AI, it's the digital function of the demo device itself. It has no place
+# in a blank real engagement for an unrelated product, so it's filtered out of
+# the sidebar outside demo mode (see inject_globals below).
 NAV_ITEMS = [
     {"section": "Workspace"},
     {"name": "Dashboard", "endpoint": "dashboard", "icon": "file-text"},
     {"name": "Upload Clinical Data", "endpoint": "upload", "icon": "upload"},
     {"name": "Regulations", "endpoint": "regulations", "icon": "scale"},
     {"name": "Policy News", "endpoint": "policy_news", "icon": "newspaper"},
+    {"name": "Bolus Calculator", "endpoint": "bolus_calculator", "icon": "calculator", "demo_only": True},
     {"section": "Generate"},
     {"name": "Global Value Dossier", "endpoint": "global_dossier", "icon": "file-stack"},
     {"name": "MSL Materials", "endpoint": "msl_material", "icon": "message-square"},
-    {"name": "Bolus Calculator", "endpoint": "bolus_calculator", "icon": "calculator"},
     {"section": "Deliver"},
     {"name": "Document Library", "endpoint": "documents", "icon": "folder-open"},
     {"name": "Resources", "endpoint": "resources", "icon": "book-open"},
@@ -77,6 +99,12 @@ NAV_ITEMS = [
     {"name": "Audit Trail", "endpoint": "audit_trail", "icon": "history"},
     {"name": "Settings", "endpoint": "settings", "icon": "settings"},
 ]
+
+
+def visible_nav_items() -> list[dict]:
+    """Nav list scoped to the active workspace — demo-only items drop out of the tool."""
+    mode = session.get("workspace_mode")
+    return [item for item in NAV_ITEMS if not item.get("demo_only") or mode == "demo"]
 
 
 # --------------------------------------------------------------------------
@@ -116,17 +144,18 @@ def seed_demo_engagement(db) -> int:
     log_event(db, engagement_id, "consent.granted", "client", "demo",
               {"scope": "audit logging and AI generation"})
 
-    for filename, category in SAMPLE_FILES:
+    for filename, category in SAMPLE_FILES + [(SAMPLE_BRAND_TEMPLATE, "brand")]:
         source = os.path.join(SAMPLE_DIR, filename)
         if not os.path.exists(source):
             continue
-        stored_name = f"{engagement_id}_{filename}"
+        basename = os.path.basename(filename)
+        stored_name = f"{engagement_id}_{basename}"
         destination = os.path.join(UPLOAD_DIR, stored_name)
         shutil.copyfile(source, destination)
 
         record = UploadedFile(
             engagement_id=engagement_id,
-            filename=filename,
+            filename=basename,
             file_path=stored_name,
             file_size=os.path.getsize(destination),
             sha256_checksum=dataset.checksum(destination),
@@ -135,8 +164,10 @@ def seed_demo_engagement(db) -> int:
         )
         db.add(record)
         db.commit()
-        log_event(db, engagement_id, "data.uploaded", "client", "demo",
-                  {"filename": filename, "category": category,
+        log_event(db, engagement_id,
+                  "brand_template.uploaded" if category == "brand" else "data.uploaded",
+                  "client", "demo",
+                  {"filename": basename, "category": category,
                    "checksum": record.sha256_checksum},
                   uploaded_file_id=record.id)
 
@@ -172,21 +203,72 @@ def seed_demo_engagement(db) -> int:
     return engagement_id
 
 
+def seed_blank_engagement(db, client_name: str) -> int:
+    """
+    Create an empty engagement for the real tool — no sample files, no pre-filled
+    brief content. This is what "Open the Tool" from the landing page starts from,
+    kept deliberately separate from the CGM demo engagement.
+    """
+    engagement = Engagement(
+        client_name=client_name or "New Engagement",
+        consent_given=False,
+    )
+    db.add(engagement)
+    db.commit()
+    engagement_id = engagement.id
+
+    consent_gate(db, engagement_id, consent_given=True)
+
+    create_brief_v1(
+        db,
+        engagement_id=engagement_id,
+        deliverable_types=[],
+        therapeutic_area="",
+        target_markets=[],
+        regulatory_frameworks=[],
+        languages=[],
+        output_formats=[],
+        tone="Scientific",
+    )
+    return engagement_id
+
+
 def active_engagement_id(db) -> int:
-    """The engagement bound to this browser session, seeding the demo on first visit."""
-    engagement_id = session.get("engagement_id")
+    """
+    The engagement bound to this browser session — scoped to the active workspace
+    (tool or demo) so the two never share data. Each mode gets its own session key,
+    so switching between them mid-session preserves both rather than clobbering one.
+    """
+    mode = session.get("workspace_mode", "tool")
+    session_key = f"engagement_id_{mode}"
+
+    engagement_id = session.get(session_key)
     if engagement_id and db.get(Engagement, engagement_id):
         return engagement_id
 
-    existing = (
-        db.query(Engagement)
-        .filter(Engagement.client_name == DEMO_CLIENT_NAME)
-        .order_by(Engagement.created_at.desc())
-        .first()
-    )
-    engagement_id = existing.id if existing else seed_demo_engagement(db)
-    session["engagement_id"] = engagement_id
+    if mode == "demo":
+        existing = (
+            db.query(Engagement)
+            .filter(Engagement.client_name == DEMO_CLIENT_NAME)
+            .order_by(Engagement.created_at.desc())
+            .first()
+        )
+        engagement_id = existing.id if existing else seed_demo_engagement(db)
+    else:
+        engagement_id = seed_blank_engagement(db, session.get("workspace_client_name"))
+
+    session[session_key] = engagement_id
     return engagement_id
+
+
+@app.before_request
+def require_workspace():
+    """Force every page except the landing/entry routes through a chosen workspace."""
+    if request.endpoint in PUBLIC_ENDPOINTS or request.endpoint is None:
+        return None
+    if not session.get("workspace_mode"):
+        return redirect(url_for("landing"))
+    return None
 
 
 def engagement_context(db) -> tuple[int, dict, dict]:
@@ -214,9 +296,19 @@ def dataset_stats(db, engagement_id: int) -> dict:
             "rows": 0,
             "columns": [],
             "error": None,
+            "note": None,
         }
 
-        if os.path.exists(path) and dataset.is_tabular(record.filename):
+        if record.category == "brand":
+            # Brand assets carry no clinical data — describe the template instead of
+            # reporting "0 rows", which reads like a parse failure.
+            info = deck.inspect_template(path) if os.path.exists(path) else {}
+            entry["error"] = info.get("error") if os.path.exists(path) else "File missing from storage"
+            entry["note"] = (
+                f"{info.get('layout_count')} layouts · {info.get('aspect_ratio')}"
+                if not entry["error"] else None
+            )
+        elif os.path.exists(path) and dataset.is_tabular(record.filename):
             table = dataset.read_table(path)
             entry["rows"] = table["row_count"]
             entry["columns"] = table["columns"]
@@ -235,6 +327,38 @@ def dataset_stats(db, engagement_id: int) -> dict:
         stats["files"].append(entry)
 
     return stats
+
+
+def brand_templates(db, engagement_id: int) -> list[dict]:
+    """
+    Uploaded PowerPoint templates available to format generated slide decks.
+
+    Each entry carries what python-pptx could read out of the file (layouts,
+    aspect ratio, theme fonts) so the picker can show the user what they
+    actually uploaded rather than just a filename.
+    """
+    records = (
+        db.query(UploadedFile)
+        .filter_by(engagement_id=engagement_id, category="brand")
+        .order_by(UploadedFile.uploaded_at.desc())
+        .all()
+    )
+
+    templates = []
+    for record in records:
+        if not deck.is_template(record.filename):
+            continue
+        path = os.path.join(UPLOAD_DIR, record.file_path)
+        info = deck.inspect_template(path) if os.path.exists(path) else {"error": "File missing"}
+        templates.append({
+            "id": record.id,
+            "filename": record.filename,
+            "size": record.file_size,
+            "path": path,
+            "uploaded_at": record.uploaded_at,
+            **info,
+        })
+    return templates
 
 
 def file_size_label(num_bytes: int) -> str:
@@ -301,11 +425,13 @@ def markdown_to_html(text: str) -> str:
 @app.context_processor
 def inject_globals():
     return {
-        "nav_items": NAV_ITEMS,
+        "nav_items": visible_nav_items(),
         "current_role": current_role(),
         "current_role_label": content.ROLE_LABELS.get(current_role(), "Administrator"),
         "can": can,
         "file_size_label": file_size_label,
+        "workspace_mode": session.get("workspace_mode"),
+        "workspace_client_name": session.get("workspace_client_name"),
     }
 
 
@@ -313,11 +439,50 @@ app.jinja_env.filters["markdown"] = markdown_to_html
 
 
 # --------------------------------------------------------------------------
-# Dashboard
+# Landing page — chooses between the tool and the demo, never both at once
 # --------------------------------------------------------------------------
 
 
 @app.route("/")
+def landing():
+    return render_template("landing.html")
+
+
+@app.route("/enter/tool", methods=["GET", "POST"])
+def enter_tool():
+    """Start (or resume) a blank, real engagement — no CGM sample data involved."""
+    if request.method == "POST":
+        session["workspace_mode"] = "tool"
+        session["workspace_client_name"] = (request.form.get("client_name") or "").strip() or "New Engagement"
+        session.pop("engagement_id_tool", None)  # fresh engagement, not the last blank one
+        session.pop("wizard", None)
+        return redirect(url_for("dashboard"))
+    return render_template("enter_tool.html")
+
+
+@app.route("/enter/demo", methods=["POST"])
+def enter_demo():
+    """Enter the pre-loaded CGM / MDR / Spain demo engagement."""
+    session["workspace_mode"] = "demo"
+    session["workspace_client_name"] = DEMO_CLIENT_NAME
+    session.pop("wizard", None)
+    return redirect(url_for("dashboard"))
+
+
+@app.route("/switch-workspace", methods=["POST"])
+def switch_workspace():
+    """Leave the current workspace and go back to the landing page to choose again."""
+    session.pop("workspace_mode", None)
+    session.pop("workspace_client_name", None)
+    return redirect(url_for("landing"))
+
+
+# --------------------------------------------------------------------------
+# Dashboard
+# --------------------------------------------------------------------------
+
+
+@app.route("/dashboard")
 def dashboard():
     db = get_db()
     try:
@@ -390,19 +555,41 @@ def switch_role():
 @app.route("/demo/reset", methods=["POST"])
 def reset_demo():
     """Rebuild the demo engagement from the sample data, discarding generated work."""
+    if session.get("workspace_mode") != "demo":
+        return redirect(url_for("dashboard"))
     db = get_db()
     try:
-        engagement_id = session.get("engagement_id")
+        engagement_id = session.get("engagement_id_demo")
         if engagement_id:
             engagement = db.get(Engagement, engagement_id)
             if engagement:
                 db.delete(engagement)
                 db.commit()
-        session.pop("engagement_id", None)
+        session.pop("engagement_id_demo", None)
         session.pop("wizard", None)
-        session["engagement_id"] = seed_demo_engagement(db)
+        session["engagement_id_demo"] = seed_demo_engagement(db)
         flash("Demo reset — sample CGM dataset and brief reloaded.", "success")
         return redirect(url_for("dashboard"))
+    finally:
+        db.close()
+
+
+@app.route("/tool/new", methods=["POST"])
+def new_tool_engagement():
+    """Discard the current blank engagement and start a fresh one for the tool."""
+    if session.get("workspace_mode") != "tool":
+        return redirect(url_for("dashboard"))
+    db = get_db()
+    try:
+        engagement_id = session.get("engagement_id_tool")
+        if engagement_id:
+            engagement = db.get(Engagement, engagement_id)
+            if engagement:
+                db.delete(engagement)
+                db.commit()
+        session.pop("engagement_id_tool", None)
+        session.pop("wizard", None)
+        return redirect(url_for("enter_tool"))
     finally:
         db.close()
 
@@ -760,6 +947,65 @@ def refine_generation(run_id):
 # --------------------------------------------------------------------------
 
 
+@app.route("/brand-template/upload", methods=["POST"])
+def upload_brand_template():
+    """Accept a corporate .pptx/.potx used to format generated slide decks."""
+    db = get_db()
+    try:
+        engagement_id = active_engagement_id(db)
+
+        if not can("manage_brand_guidelines"):
+            flash(f"{content.ROLE_LABELS[current_role()]} cannot manage brand guidelines.", "error")
+            return redirect(url_for("msl_material"))
+
+        upload_file = request.files.get("template")
+        if not upload_file or not upload_file.filename:
+            flash("Choose a .pptx or .potx file to upload.", "error")
+            return redirect(url_for("msl_material"))
+
+        original = upload_file.filename
+        if not deck.is_template(original):
+            flash(f"{original} is not a PowerPoint template — expected .pptx or .potx.", "error")
+            return redirect(url_for("msl_material"))
+
+        safe_name = secure_filename(original)
+        stored_name = f"{engagement_id}_{int(datetime.utcnow().timestamp())}_{safe_name}"
+        destination = os.path.join(UPLOAD_DIR, stored_name)
+        upload_file.save(destination)
+
+        # Reject anything python-pptx cannot open, rather than storing a file that
+        # will only fail later at export time.
+        info = deck.inspect_template(destination)
+        if info.get("error"):
+            os.remove(destination)
+            flash(f"{original} could not be read as a PowerPoint template — {info['error']}", "error")
+            return redirect(url_for("msl_material"))
+
+        record = UploadedFile(
+            engagement_id=engagement_id,
+            filename=original,
+            file_path=stored_name,
+            file_size=os.path.getsize(destination),
+            sha256_checksum=dataset.checksum(destination),
+            category="brand",
+            uploaded_by=current_role(),
+        )
+        db.add(record)
+        db.commit()
+
+        log_event(db, engagement_id, "brand_template.uploaded", "client", current_role(),
+                  {"filename": original, "checksum": record.sha256_checksum,
+                   "layouts": info.get("layout_count"), "aspect_ratio": info.get("aspect_ratio"),
+                   "fonts": f"{info.get('major_font')}/{info.get('minor_font')}"},
+                  uploaded_file_id=record.id)
+
+        flash(f"{original} uploaded — {info['layout_count']} layouts, {info['aspect_ratio']}. "
+              "Slide decks will now use this template.", "success")
+        return redirect(url_for("msl_material"))
+    finally:
+        db.close()
+
+
 @app.route("/msl-material", methods=["GET", "POST"])
 def msl_material():
     db = get_db()
@@ -782,6 +1028,7 @@ def msl_material():
                 "focus_area": request.form.get("focus_area", ""),
                 "tone": request.form.get("tone", "scientific"),
                 "key_messages": request.form.get("key_messages", ""),
+                "brand_template_id": request.form.get("brand_template_id", ""),
             }
             provider = request.form.get("provider", "offline")
             model = request.form.get("model") or llm.PROVIDERS.get(provider, {}).get("models", ["offline"])[0]
@@ -797,6 +1044,12 @@ def msl_material():
             )
             result = llm.generate(prompt, offline_draft, provider, model, api_key)
 
+            template_id = None
+            if config["brand_template_id"].isdigit():
+                candidate = db.get(UploadedFile, int(config["brand_template_id"]))
+                if candidate and candidate.engagement_id == engagement_id:
+                    template_id = candidate.id
+
             latest_brief = get_latest_brief(db, engagement_id)
             run = GenerationRun(
                 engagement_id=engagement_id,
@@ -808,6 +1061,7 @@ def msl_material():
                                    "expert": "layer-3" if config["key_messages"] else None},
                 provider=result.provider,
                 model=result.model,
+                brand_template_id=template_id,
                 generated_output=result.text,
                 status="completed",
                 completed_at=datetime.utcnow(),
@@ -828,6 +1082,9 @@ def msl_material():
                 "id": run.id, "provider": run.provider, "model": run.model,
                 "output": run.generated_output, "material": content.MSL_MATERIAL_BY_ID[material_id],
                 "config": config,
+                "is_deck": material_id == "slide-deck",
+                "brand_template": (db.get(UploadedFile, template_id).filename
+                                   if template_id else None),
             }
 
         return render_template(
@@ -839,6 +1096,7 @@ def msl_material():
             focus_areas=content.FOCUS_AREAS,
             tones=content.TONES,
             providers=llm.PROVIDERS,
+            templates=brand_templates(db, engagement_id),
             generated=generated_run,
         )
     finally:
@@ -852,6 +1110,12 @@ def msl_material():
 
 @app.route("/bolus-calculator", methods=["GET", "POST"])
 def bolus_calculator():
+    # The demo device's own digital function, not a general tool feature —
+    # keep it out of the blank/real workspace entirely, not just off its nav.
+    if session.get("workspace_mode") != "demo":
+        flash("The bolus calculator is part of the CGM demo device.", "error")
+        return redirect(url_for("dashboard"))
+
     result = None
     defaults = {"carbs_g": 60, "current_glucose": 180, "target_glucose": 110,
                 "icr": 12, "isf": 45, "insulin_on_board": 0, "trend": "steady"}
@@ -928,6 +1192,7 @@ def documents():
                 "provider": run.provider,
                 "model": run.model,
                 "round": run.round_number,
+                "format": "PPTX" if run.deliverable_type == "slide-deck" else "MD",
             })
 
         doc_types = ["All Types"] + sorted({item["type"] for item in items})
@@ -998,16 +1263,59 @@ def download_document(run_id):
             return redirect(url_for("documents"))
 
         key = run.resolved_prompt.split("::")[0]
-        filename = f"approved_{run.deliverable_type}_{key}_r{run.round_number}.md"
+        stem = f"approved_{run.deliverable_type}_{key}_r{run.round_number}"
+
+        # A slide deck is exported as a real .pptx, rendered into the client's own
+        # brand template when one was chosen. Everything else exports as Markdown.
+        if run.deliverable_type == "slide-deck":
+            template_path = None
+            template_name = None
+            if run.brand_template_id:
+                record = db.get(UploadedFile, run.brand_template_id)
+                if record and record.engagement_id == engagement_id:
+                    candidate = os.path.join(UPLOAD_DIR, record.file_path)
+                    if os.path.exists(candidate):
+                        template_path = candidate
+                        template_name = record.filename
+
+            payload, note = deck.build_deck(
+                run.generated_output or "",
+                template_path,
+                title=content.MSL_MATERIAL_BY_ID["slide-deck"]["name"],
+                subtitle=f"{brief_subtitle(db, engagement_id)}",
+            )
+            if payload:
+                filename = f"{stem}.pptx"
+                path = os.path.join(STORAGE_DIR, secure_filename(filename))
+                with open(path, "wb") as handle:
+                    handle.write(payload)
+                log_event(db, engagement_id, "document.exported", "user", current_role(),
+                          {"filename": filename, "format": "pptx",
+                           "brand_template": template_name, "note": note or None},
+                          generation_run_id=run.id)
+                return send_file(path, as_attachment=True, download_name=filename)
+            flash(note or "Could not build the PowerPoint file; exported as Markdown instead.",
+                  "error")
+
+        filename = f"{stem}.md"
         path = os.path.join(STORAGE_DIR, secure_filename(filename))
         with open(path, "w", encoding="utf-8") as handle:
             handle.write(run.generated_output or "")
 
         log_event(db, engagement_id, "document.exported", "user", current_role(),
-                  {"filename": filename}, generation_run_id=run.id)
+                  {"filename": filename, "format": "md"}, generation_run_id=run.id)
         return send_file(path, as_attachment=True, download_name=filename)
     finally:
         db.close()
+
+
+def brief_subtitle(db, engagement_id: int) -> str:
+    """Short line for a deck's title slide — device area and markets from the brief."""
+    brief = get_latest_brief(db, engagement_id)
+    if not brief:
+        return ""
+    markets = ", ".join(brief.target_markets or [])
+    return " · ".join(part for part in (brief.therapeutic_area, markets) if part)
 
 
 # --------------------------------------------------------------------------
@@ -1186,7 +1494,7 @@ if __name__ == "__main__":
     print("  APProved — Medical Writing Platform (prototype)")
     print("=" * 64)
     print(f"  URL      : http://localhost:{port}")
-    print(f"  Demo     : CGM pivotal study · EU MDR · Spain launch")
+    print(f"  Landing  : choose the Tool (blank) or the Demo (CGM · MDR · Spain)")
     print(f"  LLM mode : {'live keys detected for ' + ', '.join(live) if live else 'offline (no API key needed)'}")
     print("  Stop     : Ctrl+C")
     print("=" * 64 + "\n")

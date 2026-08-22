@@ -155,10 +155,26 @@
         {% endfor %}
     </div>
 
-    <form method="POST" action="{{ url_for('reset_demo') }}" class="mt-6">
-        <button type="submit" class="btn btn--outline btn--sm">
-            {{ icons.icon("refresh", 16) }} Reset demo data
-        </button>
-    </form>
+    <div class="row mt-6" style="gap:.75rem">
+        {% if workspace_mode == "demo" %}
+            <form method="POST" action="{{ url_for('reset_demo') }}">
+                <button type="submit" class="btn btn--outline btn--sm">
+                    {{ icons.icon("refresh", 16) }} Reset demo data
+                </button>
+            </form>
+        {% else %}
+            <form method="POST" action="{{ url_for('new_tool_engagement') }}"
+                  onsubmit="return confirm('Start a new engagement? This discards the current one.')">
+                <button type="submit" class="btn btn--outline btn--sm">
+                    {{ icons.icon("refresh", 16) }} Start a new engagement
+                </button>
+            </form>
+        {% endif %}
+        <form method="POST" action="{{ url_for('switch_workspace') }}">
+            <button type="submit" class="btn btn--ghost btn--sm">
+                {{ icons.icon("arrow-left", 16) }} Choose a different workspace
+            </button>
+        </form>
+    </div>
 </div>
 {% endblock %}

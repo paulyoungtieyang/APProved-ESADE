@@ -21,15 +21,27 @@
             </span>
         </a>
 
-        <form method="POST" action="{{ url_for('switch_role') }}" style="display:contents">
-            <input type="hidden" name="next" value="{{ request.path }}">
-            <button type="submit" class="role-badge" title="Switch role">
-                {{ icons.icon("shield", 16) }}
-                <span>{{ current_role_label }}</span>
-            </button>
-        </form>
+        <div class="row" style="gap:.5rem">
+            <form method="POST" action="{{ url_for('switch_workspace') }}" style="display:contents">
+                <button type="submit"
+                        class="workspace-badge {{ 'is-demo' if workspace_mode == 'demo' else 'is-tool' }}"
+                        title="Switch workspace — back to the landing page">
+                    {{ icons.icon("flask-conical" if workspace_mode == "demo" else "briefcase", 16) }}
+                    <span>{{ "Demo — CGM Study" if workspace_mode == "demo" else (workspace_client_name or "Live Workspace") }}</span>
+                </button>
+            </form>
 
-        <button class="menu-toggle" id="menuToggle" aria-label="Toggle navigation" aria-expanded="false">
+            <form method="POST" action="{{ url_for('switch_role') }}" style="display:contents">
+                <input type="hidden" name="next" value="{{ request.path }}">
+                <button type="submit" class="role-badge" title="Switch role">
+                    {{ icons.icon("shield", 16) }}
+                    <span>{{ current_role_label }}</span>
+                </button>
+            </form>
+        </div>
+
+        <button type="button" class="menu-toggle" id="menuToggle"
+                aria-label="Toggle navigation" aria-expanded="false">
             {{ icons.icon("menu", 24) }}
         </button>
     </div>
