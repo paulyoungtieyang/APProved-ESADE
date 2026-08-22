@@ -41,8 +41,20 @@ Localization runs on two axes:
 | Submit | Guided 5-step submission workflow ending in human review |
 | Settings | Role-based access control and approval workflow |
 
+## Implementation
+
+The working prototypes live in
+[`paulyoungtieyang/APProved`](https://github.com/paulyoungtieyang/APProved), each on its
+own branch:
+
+| Branch | What it is |
+|---|---|
+| `prototype-2` | Next.js app; Global Value Dossier and MSL Materials wired to live Claude generation |
+| `prototype-1-ucla-version` (`v1.0`) | Python agentic EU MDR CE-mark drafting workflow — intake gates, parallel section drafting, automated compliance judge, human review loops, full audit trail |
+
 See [`docs/prototype-analysis.md`](docs/prototype-analysis.md) for a full breakdown of the
-prototype's functionality, traceability to user testing, and open gaps.
+prototype's functionality, the agentic pipeline behind generation, traceability to user
+testing, and open gaps.
 
 ## Value proposition
 

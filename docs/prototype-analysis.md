@@ -10,6 +10,10 @@ design-thinking process deck and the Deliverable 2 user-testing findings.
 | `Updated APProved Prototype.mp4` | 2:14 screen recording, 2136×1454, **no audio track** — all findings below are read off the screens |
 | `Team 3 - Fashion Icons - InClass Deliverable.pdf` | 33 pages, design thinking process (Empathize → Define → Ideate → Test) |
 | `Team 3 - Fashion Icons - Deliverable 2 - User Testing.pdf` | 11 pages, 4 user interviews + prototype backlog + value proposition |
+| [`paulyoungtieyang/APProved`](https://github.com/paulyoungtieyang/APProved) | Source. `prototype-2` — Next.js app with GVD/MSL wired to live Claude generation. `prototype-1-ucla-version` (`v1.0`) — Python agentic EU MDR CE-mark workflow |
+
+Where the recording and the source disagree, **the source wins** — §2.5 and §4 are read
+from code, and §6 is reassessed against it.
 
 ---
 
@@ -77,16 +81,61 @@ This addresses the "dealing with changing policies" job-to-be-done from the pers
 
 ### 2.5 Global Value Dossier generator — core engine #1
 
-- **Dossier Configuration:** Therapeutic Area (Oncology) · Target Markets (Global — All
-  Regions) · Language (English) · Output Format (PDF).
-- **Regional Tender Specifications (optional):** upload past tender documents or enter a
-  tender ID — *"AI will map content to localized public purchasing criteria."*
-- **Dossier Sections** — modular, individually selectable and expandable. *"AI will
-  generate content for each section based on your uploaded data."* Sections visible in the
-  walkthrough:
-  - **Executive Summary** — high-level overview of clinical value proposition
-  - **Disease & Epidemiology** — disease burden, prevalence, and unmet medical needs
-  - (further sections exist below the fold but were not scrolled into view)
+The walkthrough shows the configuration surface; the working implementation lives in
+[`paulyoungtieyang/APProved`](https://github.com/paulyoungtieyang/APProved) on the
+`prototype-2` branch. Details below are read from that source, not inferred from the video.
+
+**Configuration vocabularies** (`web/src/lib/mock-data/dossier-options.ts`)
+
+| Field | Options |
+|---|---|
+| Therapeutic Area | Cardiometabolic · Oncology · Immunology · Neurology · Diagnostics & Monitoring |
+| Target Market | Global (All Regions) · United States · European Union · Japan · China · Australia · Canada |
+| Language | English · French · German · Japanese · Chinese |
+| Output Format | PDF · Word (DOCX) · PowerPoint (PPTX) |
+| Tender Type | Public Tender · Hospital Formulary · National HTA Submission · Private Payer |
+
+**Regional Tender Specifications (optional)** — free-text spec or tender ID, passed
+through to the model so content maps to localized public purchasing criteria.
+
+**The eight dossier sections** — modular and individually selectable, all selected by
+default:
+
+| # | Section | Description |
+|---|---|---|
+| 1 | Executive Summary | High-level overview of clinical value proposition |
+| 2 | Disease & Epidemiology | Disease burden, prevalence, and unmet medical needs |
+| 3 | Clinical Efficacy Data | Phase 3 trial results, endpoints, and statistical analysis |
+| 4 | Safety & Tolerability | Adverse events, safety profile, and risk-benefit analysis |
+| 5 | Pharmacoeconomic Analysis | Cost-effectiveness, budget impact, and economic value |
+| 6 | Quality of Life Outcomes | Patient-reported outcomes and quality of life assessments |
+| 7 | Comparative Effectiveness | Comparison with current standard of care and competitors |
+| 8 | Target Population | Patient population, inclusion criteria, and treatment eligibility |
+
+**Generation endpoint** — `POST /api/generate-dossier`
+(`web/src/app/api/generate-dossier/route.ts`, Node runtime)
+
+- **Request:** `therapeuticArea`, `market`, `language`, `outputFormat`, `sectionIds[]`,
+  optional `regionalTenderSpec`, `provider`, `apiKey`, `promptRules`.
+- **Dual provider:** Claude (default) on `claude-opus-5`, `max_tokens` 8000, medium
+  reasoning effort; OpenAI on `gpt-4o`, `max_tokens` 4000.
+- **Expert-editable prompt rules:** a `promptRules` string is appended to the system
+  prompt as *"Additional rules from the regulatory/medical affairs team — follow these
+  strictly."* This lets medical affairs constrain generation without a code change.
+- **System role:** *"a market access and value-communications specialist drafting an
+  early-stage Global Value Dossier. Output valid markdown only."*
+- **Anti-fabrication instruction:** the prompt asks for *"representative (clearly
+  illustrative, not fabricated as if real) figures and claims"*, 2–4 short paragraphs per
+  section, and nothing outside the requested sections.
+- **Validation:** missing required fields or zero valid sections → `400`; unconfigured
+  provider → `503`; upstream failure → `502`.
+- **Output:** markdown, one `## ` heading per selected section, in the requested order.
+
+**Result rendering** (`GeneratedDossierPreview.tsx`) — the UI runs an
+`idle → generating → done → error` state machine, disables the button while generating,
+surfaces errors inline, and renders the draft under a **"Draft generated by Claude"**
+badge titled *"{Therapeutic Area} Global Value Dossier — {Market}"* with a
+*"{Language} · {Output Format}"* subline.
 
 ### 2.6 MSL Materials — core engine #2 (medical scientific communication)
 
@@ -189,7 +238,93 @@ Three cross-cutting design themes:
 
 ---
 
-## 4. Traceability — every user-testing backlog item shipped
+## 4. The agentic pipeline — what GVD generation should adopt
+
+The `prototype-1-ucla-version` branch (tagged `v1.0`) implements a full agentic EU MDR
+CE-mark drafting workflow in Python. GVD generation is currently a **single LLM call**;
+the MDR pipeline is a **gated, parallelized, reviewed workflow**. These are the pieces
+worth porting across.
+
+### 4.1 Parallel section drafting — `drafting.py`
+
+Each section is an independent, focused LLM call, run concurrently via `ThreadPoolExecutor`.
+The design note is explicit that this is *parallelization (sectioning)*, not an open-ended
+orchestrator-worker agent, because the target document structure is fixed and known in
+advance — so the `SECTIONS` list **is** the architecture decision.
+
+The same reasoning applies directly to the GVD: its eight sections are equally fixed, so
+one call per section would improve depth per section and cut wall-clock time, replacing
+today's single 8000-token call covering all eight at once.
+
+### 4.2 Automated compliance gate — `judge.py`
+
+An LLM-as-Judge check that runs **before the draft reaches a human**. Deliberately built as
+a *checklist scorer* rather than a free-text critic: it returns a fixed, parseable format
+so the orchestrator can act on it programmatically and redraft flagged sections without a
+second interpretive call. The stated rationale is that it catches mechanical gaps cheaply
+so the expert's single review pass is spent on things that genuinely need judgment.
+
+A GVD equivalent would score each section against a market-access rubric — evidence cited,
+comparator named, economic claim substantiated.
+
+### 4.3 Human-in-the-loop review — `review.py`
+
+Two applications of the same evaluator-optimizer pattern with a **human as the evaluator**:
+
+- `internal_expert_review()` — one QA pass, capped for safety
+- `client_review_loop()` — up to `max_client_rounds` rounds, then a mandatory final
+  accept/decline decision
+
+Supports both interactive input and a scripted `auto_demo` mode for unattended end-to-end
+runs. **This is the missing "expert review" surface identified in §6.2** — it already
+exists in Python and has no UI counterpart in the web app.
+
+### 4.4 Live regulatory grounding — `regulation.py`
+
+Fetches the live regulation-updates feed and **combines** it with a local clause-level
+reference rather than replacing it: the local file carries the Annex I/II/III/XIV clause
+structure that drafting and review are grounded in, while the live fetch adds visibility
+into recent amendments and guidance. An `--offline` flag falls back to local only.
+
+This is the concrete wiring between **Policy News and generation** — the design note states
+retrieval should refresh whenever the news feed flags a change. Today those two modules are
+unconnected.
+
+### 4.5 Audit trail — `audit_trail.py`
+
+A structured, per-submission record: every gate decision, every round of human feedback,
+every redraft, every classification discrepancy and its resolution, and the final outcome —
+each timestamped and attributed to system, agent, client, or regulatory expert. Emitted in
+two formats from one event list: `.audit.json` (machine-readable) and `.audit.txt` (a
+plain-language transcript).
+
+Critically, it is **consent-gated**: a run that never receives logging consent never gets a
+trail written. This is the traceability layer that answers the AI-transparency objection in
+§6.3.
+
+### 4.6 Intake gates — run in order, before any drafting
+
+| Gate | Module | Behavior |
+|---|---|---|
+| Audit-trail consent | `consent_gate.py` | Runs **first** — without consent nothing may be recorded, so nothing else is evaluated |
+| Scope | `scope_gate.py` | Rejects out-of-scope requests before any validation or drafting effort is spent |
+| Data quality | `data_quality_gate.py` | Rejects unparsable uploads, missing required intake fields, or **>15% missing patient-level data** in the pivotal dataset |
+| Classification plausibility | `classification_gate.py` | Catches implausible self-declared classifications that no human happened to challenge |
+
+Each gate declines with a stated reason rather than failing silently. The data-quality gate
+in particular is the structural answer to the hallucination concern — it refuses to draft
+from insufficient input instead of inventing content to fill gaps.
+
+### 4.7 Branded export — `docx_export.py`
+
+Uses `python-docx` with no external dependencies (no LibreOffice or Word install required).
+When a brand template is supplied it opens that as the base document instead of a blank
+one, so headers, footers, and styles carry over — the delivery half of the Brand Book
+feature the web UI already collects assets for.
+
+---
+
+## 5. Traceability — every user-testing backlog item shipped
 
 Backlog from Deliverable 2 (p. 9) mapped to where it landed in the prototype:
 
@@ -204,51 +339,96 @@ Backlog from Deliverable 2 (p. 9) mapped to where it landed in the prototype:
 
 ---
 
-## 5. Open gaps
+## 6. Open gaps
 
-Six items worth addressing, roughly in priority order.
+Reassessed against the `APProved` source. Two gaps previously flagged from the recording
+alone turned out to be already solved in code, and the central gap is now clearer: **the
+two halves of the product do not share an architecture.**
 
-1. **Stale product name in the build.** Resources → MSA reads *"Standard service agreement
-   for **BioWrite AI** platform usage."* Leftover from an earlier product name; should read
-   APProved.
+### 6.1 The headline gap — GVD generation has none of the pipeline's rigor
 
-2. **Human expert review has no UI of its own.** This was the single strongest trust answer
-   in user testing — Laia: *"combining the like AI power, but having experts that would be
-   reviewing everything and working with us would be something that we would really
-   value."* Estefanía: *"It should definitely go through a human review."* Currently it is
-   only implied through the Compliance Officer role and the Review & Submit step. There is
-   no assigned reviewer, review status, SLA, or milestone tracking. Given it is both the
-   primary trust answer and the primary differentiator against generic AI tools, it
-   warrants a dedicated surface.
+The MDR workflow (§4) runs gates → parallel drafting → automated judge → human review →
+audit trail. The GVD path is **one LLM call**, with no intake gate, no compliance scoring,
+no review loop, and no audit record. Same company, same claim, two very different levels of
+assurance.
 
-3. **No AI transparency or evidence traceability layer.** Alfonso: *"Companies will want to
-   understand how the AI works before trusting it."* Oleg: *"If documents are missing, will
-   the system generate something randomly?"* Nothing links generated text back to the
-   source CSR data, and there is no citation or confidence surface.
+This is the single most consequential item on the list, and everything in §4 is a
+ready-made answer to it — the code already exists and is proven on the MDR side.
 
-4. **Automated Clinical Gap Defense is missing.** Tender *upload* exists, but the
-   auto-generated clinical justification for when a product feature does not match tender
-   requirements — rated a top opportunity in the consolidated takeaways — does not appear
-   anywhere in the flow.
+### 6.2 Expert review exists in Python, but has no web UI
 
-5. **No generated output is ever shown.** The walkthrough covers configuration screens and
-   a finished Document Library, but never the agentic generation process running, nor a
-   single excerpt of actual generated content. For a product whose entire claim rests on
-   output quality, a real dossier excerpt would be the most persuasive screen — and it is
-   the one screen that does not exist. This also directly answers the "fear of generic
-   outputs" risk raised by Laia.
+The single strongest trust answer in user testing — Laia: *"combining the like AI power,
+but having experts that would be reviewing everything and working with us would be
+something that we would really value."* Estefanía: *"It should definitely go through a
+human review."*
 
-6. **No MDR/SaMD-specific track.** Device classification appears in the Setup Checklist and
-   SaMD roadmaps were a stated opportunity, but there is no EU MDR dossier generator
-   sitting alongside the GVD generator, despite MDR being part of the stated product scope.
+`review.py` implements exactly this (§4.3). In the web app it is only *implied* through the
+Compliance Officer role and the Review & Submit step: no assigned reviewer, review status,
+SLA, or milestone tracking. **This is a porting job, not a design-from-scratch job.**
+
+### 6.3 Transparency layer exists in Python, but is not surfaced
+
+Alfonso: *"Companies will want to understand how the AI works before trusting it."* Oleg:
+*"If documents are missing, will the system generate something randomly?"*
+
+`audit_trail.py` already produces a timestamped, attributed, consent-gated record in both
+machine- and human-readable form (§4.5), and the data-quality gate structurally prevents
+drafting from insufficient input (§4.6). Neither is visible anywhere in the web UI, and
+generated GVD sections carry no citations back to source data.
+
+### 6.4 Automated Clinical Gap Defense is still missing
+
+Tender *input* exists — `regionalTenderSpec` is passed to the model — but nothing
+auto-generates clinical justification when a product feature does not match tender
+requirements. Rated a top opportunity in the consolidated takeaways; absent from both
+codebases.
+
+### 6.5 Policy News and generation are unconnected
+
+`regulation.py` establishes the pattern of combining live regulatory fetch with a local
+clause-level reference (§4.4), and the design note states retrieval should refresh whenever
+the news feed flags a change. In the web app, Policy News is a read-only feed that feeds
+nothing.
+
+### 6.6 Two disconnected codebases
+
+The MDR pipeline is a Python CLI; the GVD and MSL generators are a Next.js app. They share
+no code, no data model, and no audit surface. The `README` frames prototypes as
+independently checkout-able snapshots, which is sound for coursework — but the
+consolidation question is now live.
+
+### Resolved since the previous revision
+
+- ~~*GVD section list incomplete*~~ — all eight sections are enumerated in §2.5.
+- ~~*No generated output is ever shown*~~ — the app renders drafts via
+  `GeneratedDossierPreview` with a "Draft generated by Claude" badge. This was a **recording
+  gap, not a product gap**: the walkthrough simply never triggers a generation. Worth
+  capturing on video, since it directly answers Laia's "fear of generic outputs" risk.
+- ~~*No MDR/SaMD track*~~ — `prototype-1-ucla-version` **is** a complete EU MDR CE-mark
+  workflow. It is not absent, it is unintegrated (see §6.6).
+
+### Still open from the recording
+
+**Stale product name.** Resources → MSA reads *"Standard service agreement for **BioWrite
+AI** platform usage."* Leftover from an earlier product name.
 
 ---
 
-## 6. Suggested next steps
+## 7. Suggested next steps
 
-- Fix the BioWrite AI string.
-- Design an **Expert Review** surface: reviewer assignment, review status per document,
-  turnaround SLA, and milestone tracking.
-- Add **source citations** to generated sections, traceable back to uploaded files.
-- Build the **Gap Defense** output on top of the existing tender upload.
-- Record one screen of **real generated dossier content** for the next demo.
+Ordered by leverage:
+
+1. **Port the pipeline to GVD generation** — the highest-value work, and mostly a
+   translation exercise since the Python implementations are proven:
+   - Split the single call into eight parallel per-section calls (§4.1)
+   - Add a market-access rubric judge before human review (§4.2)
+   - Add a data-quality intake gate so the system declines rather than invents (§4.6)
+2. **Build the Expert Review UI** on top of `review.py`'s two-loop model — reviewer
+   assignment, per-document status, round count, accept/decline (§4.3, §6.2).
+3. **Surface the audit trail** in the web app, and add per-section source citations
+   traceable back to uploaded files (§4.5, §6.3).
+4. **Wire Policy News into retrieval** so flagged changes refresh generation grounding
+   (§4.4, §6.5).
+5. **Build Gap Defense** on top of the existing `regionalTenderSpec` input (§6.4).
+6. **Re-record the demo** including a live generation and the rendered draft (§6, Resolved).
+7. Fix the BioWrite AI string.
