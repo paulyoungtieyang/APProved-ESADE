@@ -14,12 +14,12 @@ through EU MDR conformity assessment, launching in Spain.
 
 ## Run it
 
-```bash
-pip install -r requirements.txt
-```
+**Quickest way:** use the launch script.
 
 ```bash
-python3 app.py
+./launch-demo.sh        # macOS / Linux
+launch-demo.bat         # Windows
+make launch             # or via Makefile
 ```
 
 The app opens at **http://localhost:5001** on a landing page with two paths:
@@ -33,8 +33,24 @@ The two are separate engagements end to end — uploads, briefs and generated do
 one are never visible from the other. A badge in the header always shows which one you're
 in, and it doubles as a "switch workspace" control back to the landing page.
 
+**Manual setup** (if the scripts don't work):
+
+```bash
+pip install flask sqlalchemy python-pptx markupsafe
+python3 app.py
+```
+
 No API key. No internet. No configuration. Set `PORT` to use a different port, or
 `OPEN_BROWSER=0` to stop it launching a browser tab.
+
+**Other useful commands:**
+
+```bash
+make install    # Install dependencies
+make dev        # Start the dev server (no browser launch)
+make clean      # Remove database and generated files
+make help       # Show all available commands
+```
 
 ---
 
