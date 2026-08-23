@@ -174,7 +174,8 @@ class AuditEvent(Base):
     engagement_id = Column(Integer, ForeignKey("engagement.id"), nullable=False)
     event_type = Column(String(100), nullable=False)
     # consent.granted, consent.declined, data.uploaded, brief.submitted, brief.revised,
-    # prompt.composed, generation.requested, generation.completed, expert_review.submitted, etc.
+    # generation.requested, generation.completed, generation.refined,
+    # review.submitted, etc.
 
     actor_type = Column(String(50), nullable=False)  # client, user, system
     actor_identity = Column(String(255), nullable=False)  # username or "system"
@@ -188,9 +189,28 @@ class AuditEvent(Base):
 
     # Payload — event-specific data, JSON for flexibility
     payload = Column(JSON, nullable=True)
-    # For consent.granted: {"timestamp": "...", "ip": "..."}
-    # For data.uploaded: {"filename": "...", "checksum": "...", "category": "..."}
-    # For generation.requested: {"resolved_prompt": "...", "provider": "...", "model": "..."}
+    # For generation: {
+    #   "section": "device-description",
+    #   "provider": "offline",
+    #   "model": "offline",
+    #   "resolved_prompt": "full text...",
+    #   "prompt_provenance": {"client": "layer-1", "template": "layer-2", "expert": "layer-3"},
+    #   "expert_overlay": "text or null",
+    #   "generated_output": "markdown...",
+    #   "round": 1,
+    #   "offline": true
+    # }
+    # For generation.refined: {
+    #   "instruction": "text...",
+    #   "resolved_prompt": "full text...",
+    #   "generated_output": "markdown...",
+    #   "round": 2
+    # }
+    # For brief.revised: {
+    #   "field_changes": {"tone": {"old": "Scientific", "new": "Balanced"}},
+    #   "reason": "client feedback",
+    #   "previous_version_id": 1
+    # }
     # API keys are NEVER stored here
 
     engagement = relationship("Engagement", back_populates="audit_events")

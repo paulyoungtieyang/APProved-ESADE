@@ -892,6 +892,47 @@ svg { flex-shrink: 0; }
 .prompt-preview .layer-expert   { color: #86efac; }
 
 /* ==========================================================================
+   Audit trail — detailed event history with prompts, modifications, feedback
+   ========================================================================== */
+
+.audit-detail {
+    padding: 1.5rem;
+}
+
+.audit-section {
+    margin-bottom: 2rem;
+}
+
+.audit-section:last-child {
+    margin-bottom: 0;
+}
+
+.audit-section h4 {
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: var(--slate-900);
+    margin-bottom: 0.75rem;
+}
+
+.audit-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+    gap: 1rem;
+    font-size: 0.875rem;
+    color: var(--slate-600);
+}
+
+.audit-grid div {
+    padding: 0.5rem;
+    background: var(--slate-50);
+    border-radius: 4px;
+}
+
+.audit-grid strong {
+    color: var(--slate-900);
+}
+
+/* ==========================================================================
    Workspace badge — header indicator of which workspace is active
    (the tool vs. the demo). Also the switch-workspace control.
    ========================================================================== */

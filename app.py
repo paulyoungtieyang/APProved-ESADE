@@ -21,6 +21,7 @@ same prompts over to a live Anthropic / OpenAI / Google model.
 
 from __future__ import annotations
 
+import io
 import json
 import os
 import shutil
@@ -33,7 +34,7 @@ from flask import (
 )
 from sqlalchemy.orm import sessionmaker
 
-from core import content, dataset, deck, llm
+from core import audit, content, dataset, deck, llm
 from core.audit import log_event, get_engagement_trail
 from core.briefs import brief_as_dict, create_brief_v1, get_latest_brief
 from core.gates import consent_gate
@@ -876,9 +877,14 @@ def api_generate_section():
         db.commit()
 
         log_event(db, engagement_id, "generation.completed", "user", current_role(),
-                  {"deliverable": "gvd", "section": section_id, "provider": result.provider,
+                  {"section": section_id, "deliverable": "gvd", "provider": result.provider,
                    "model": result.model, "offline": result.offline,
-                   "expert_overlay": bool(overlay)},
+                   "expert_overlay": overlay or None,
+                   "resolved_prompt": prompt,
+                   "prompt_provenance": {"client": "layer-1", "template": "layer-2",
+                                        "expert": "layer-3" if overlay else None},
+                   "generated_output": result.text,
+                   "round": round_number},
                   generation_run_id=run.id)
 
         return jsonify({
@@ -968,8 +974,10 @@ def refine_generation(run_id):
         db.commit()
 
         log_event(db, engagement_id, "generation.refined", "user", current_role(),
-                  {"instruction": instruction[:200], "provider": result.provider,
-                   "offline": result.offline, "round": run.round_number},
+                  {"instruction": instruction, "provider": result.provider,
+                   "offline": result.offline, "round": run.round_number,
+                   "resolved_prompt": prompt,
+                   "generated_output": result.text},
                   generation_run_id=run.id)
 
         flash(result.note or f"Refined — now at round {run.round_number}.",
@@ -1437,6 +1445,25 @@ def audit_trail():
             "payload": json.dumps(event.payload or {}, indent=2, default=str),
         } for event in reversed(events)]
         return render_template("audit.html", events=rows, brief=brief)
+    finally:
+        db.close()
+
+
+@app.route("/audit/download")
+def download_audit_trail():
+    """Download the complete audit trail as a Markdown document."""
+    db = get_db()
+    try:
+        engagement_id = active_engagement_id(db)
+        md = audit.export_audit_trail_md(db, engagement_id)
+        timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+        filename = f"approved_audit-trail_{timestamp}.md"
+        return send_file(
+            io.BytesIO(md.encode('utf-8')),
+            mimetype='text/markdown',
+            as_attachment=True,
+            download_name=filename,
+        )
     finally:
         db.close()
 

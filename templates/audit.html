@@ -6,8 +6,8 @@
 <div class="page page--lg">
     <div class="page-header">
         <h1>Audit Trail</h1>
-        <p>Append-only record of every action in this engagement. Nothing here is ever updated or
-           deleted — this is the traceability evidence for the dossier.</p>
+        <p>Append-only record of every action, modification and prompt composition in this engagement.
+           Nothing is ever updated or deleted — this is the complete traceability evidence for regulatory review.</p>
     </div>
 
     <div class="alert alert--blue">
@@ -16,7 +16,13 @@
             <div class="alert__title">{{ events | length }} recorded events</div>
             <div class="alert__body">
                 <p>Brief v{{ brief.version }} · {{ brief.regulatory_frameworks | join(', ') }} ·
-                   {{ brief.target_markets | join(', ') }}. API keys are never captured in payloads.</p>
+                   {{ brief.target_markets | join(', ') }}. Includes full prompts, generations, refinements,
+                   and brief modifications. API keys are never stored.</p>
+                <p style="margin-top:.75rem">
+                    <a href="{{ url_for('download_audit_trail') }}" class="link-cta">
+                        {{ icons.icon("download", 16) }} Download Complete Audit Trail as Markdown
+                    </a>
+                </p>
             </div>
         </div>
     </div>
@@ -27,20 +33,114 @@
                 <div class="section-row">
                     <button type="button" class="section-row__head">
                         <span class="section-row__main">
-                            <span style="color:var(--blue-600);display:flex;margin-top:.125rem">
+                            <span style="display:flex;margin-top:.125rem;color:
+                                {%- if 'generation' in event.type -%}var(--blue-600)
+                                {%- elif 'brief' in event.type -%}var(--amber-600)
+                                {%- elif 'review' in event.type -%}var(--green-600)
+                                {%- else -%}var(--slate-500)
+                                {%- endif -%}">
                                 {{ icons.icon("history", 20) }}
                             </span>
                             <span class="flex-1">
                                 <span class="section-row__title">{{ event.type }}</span><br>
                                 <span class="section-row__desc">
-                                    {{ event.created_at.strftime('%b %d, %Y · %H:%M:%S') }} — {{ event.actor }}
+                                    {{ event.created_at.strftime('%b %d, %Y · %H:%M:%S') }} by <strong>{{ event.actor }}</strong>
+                                    {%- if event.payload.section %} · {{ event.payload.section }}{%- endif %}
+                                    {%- if event.payload.round %} (round {{ event.payload.round }}){%- endif %}
                                 </span>
                             </span>
                         </span>
                         <span class="chevron">{{ icons.icon("chevron-down", 20) }}</span>
                     </button>
                     <div class="section-row__panel" hidden>
-                        <div class="prompt-preview">{{ event.payload }}</div>
+                        <div class="audit-detail">
+                            {%- if event.type.startswith('generation') %}
+                                <div class="audit-section">
+                                    <h4>Metadata</h4>
+                                    <div class="audit-grid">
+                                        <div><strong>Provider:</strong> {{ event.payload.provider }}</div>
+                                        <div><strong>Model:</strong> {{ event.payload.model }}</div>
+                                        {%- if event.payload.offline %}<div><strong>Mode:</strong> Offline simulation</div>{%- endif %}
+                                    </div>
+                                </div>
+
+                                {%- if event.payload.resolved_prompt %}
+                                    <div class="audit-section">
+                                        <h4>Resolved Prompt (Sent to Model)</h4>
+                                        <p class="text-xs" style="color:var(--slate-500);margin-bottom:.5rem">
+                                            {%- if event.payload.prompt_provenance %}
+                                                Layers:
+                                                <span style="background:var(--blue-50);padding:.1rem .3rem;border-radius:3px;font-weight:500">Client</span>
+                                                <span style="background:var(--amber-50);padding:.1rem .3rem;border-radius:3px;font-weight:500">Template</span>
+                                                {%- if event.payload.prompt_provenance.expert %}
+                                                    <span style="background:var(--purple-50);padding:.1rem .3rem;border-radius:3px;font-weight:500">Expert</span>
+                                                {%- endif %}
+                                            {%- endif %}
+                                        </p>
+                                        <div class="prompt-preview">{{ event.payload.resolved_prompt }}</div>
+                                    </div>
+                                {%- endif %}
+
+                                {%- if event.payload.expert_overlay %}
+                                    <div class="audit-section">
+                                        <h4>Expert Overlay (Layer 3)</h4>
+                                        <div class="prompt-preview" style="background:var(--purple-50);border-left:3px solid var(--purple-600)">
+                                            {{ event.payload.expert_overlay }}
+                                        </div>
+                                    </div>
+                                {%- endif %}
+
+                                {%- if event.payload.generated_output %}
+                                    <div class="audit-section">
+                                        <h4>Generated Output</h4>
+                                        <div class="prompt-preview">{{ event.payload.generated_output[:1000] }}{% if event.payload.generated_output|length > 1000 %}<br><em>… (truncated, see full document in library)</em>{% endif %}</div>
+                                    </div>
+                                {%- endif %}
+
+                            {%- elif event.type == 'brief.revised' %}
+                                <div class="audit-section">
+                                    <h4>Brief Changes</h4>
+                                    {%- if event.payload.diffs %}
+                                        {%- for field, changes in event.payload.diffs.items() %}
+                                            <div style="margin-bottom:1rem;padding:.75rem;background:#f1f5f9;border-radius:6px">
+                                                <strong>{{ field }}:</strong><br>
+                                                <span style="color:var(--red-600)">⊖ {{ changes.old }}</span><br>
+                                                <span style="color:var(--green-600)">⊕ {{ changes.new }}</span>
+                                            </div>
+                                        {%- endfor %}
+                                    {%- endif %}
+                                    {%- if event.payload.reason %}
+                                        <p class="text-xs text-muted" style="margin-top:.5rem"><em>Reason: {{ event.payload.reason }}</em></p>
+                                    {%- endif %}
+                                </div>
+
+                            {%- elif event.type == 'review.submitted' %}
+                                <div class="audit-section">
+                                    <h4>Reviewer Feedback</h4>
+                                    <div style="padding:.75rem;background:var(--green-50);border-left:3px solid var(--green-600);border-radius:4px">
+                                        {{ event.payload.feedback_text or '(no written feedback)' }}
+                                    </div>
+                                    {%- if event.payload.decision %}
+                                        <p style="margin-top:.5rem"><strong>Decision:</strong>
+                                            <span style="background:
+                                                {%- if event.payload.decision == 'accept' -%}var(--green-100)
+                                                {%- elif event.payload.decision == 'revise' -%}var(--amber-100)
+                                                {%- else -%}var(--red-100)
+                                                {%- endif -%};
+                                                padding:.2rem .4rem;border-radius:4px">
+                                                {{ event.payload.decision | upper }}
+                                            </span>
+                                        </p>
+                                    {%- endif %}
+                                </div>
+
+                            {%- else %}
+                                <div class="audit-section">
+                                    <h4>Details</h4>
+                                    <div class="prompt-preview">{{ event.payload | tojson(indent=2) }}</div>
+                                </div>
+                            {%- endif %}
+                        </div>
                     </div>
                 </div>
             {% else %}
