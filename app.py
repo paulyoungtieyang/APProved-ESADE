@@ -127,6 +127,67 @@ def can(permission: str) -> bool:
     return False
 
 
+def _generate_section_with_overlays(db, engagement_id: int, section_id: str, overlays: list[str]):
+    """Helper: generate a section, then apply expert overlays for refinement rounds."""
+    brief = get_latest_brief(db, engagement_id)
+    stats = dataset_stats(db, engagement_id)
+
+    # Round 1: Generate without overlay
+    prompt_r1 = content.build_section_prompt(section_id, brief_as_dict(brief), stats, "")
+    offline_r1 = content.draft_section(section_id, brief_as_dict(brief), stats, "")
+    result_r1 = llm.generate(prompt_r1, offline_r1, "offline", "offline", "")
+
+    run_r1 = GenerationRun(
+        engagement_id=engagement_id,
+        brief_version_id=brief.id,
+        round_number=1,
+        deliverable_type="gvd",
+        resolved_prompt=f"{section_id}::{prompt_r1}",
+        prompt_provenance={"client": "layer-1", "template": "layer-2", "expert": None},
+        provider="offline",
+        model="offline",
+        generated_output=result_r1.text,
+        status="completed",
+        completed_at=datetime.utcnow(),
+        created_by="demo",
+    )
+    db.add(run_r1)
+    db.commit()
+
+    log_event(db, engagement_id, "generation.completed", "user", "demo",
+              {"section": section_id, "deliverable": "gvd", "provider": "offline",
+               "model": "offline", "offline": True, "expert_overlay": None,
+               "resolved_prompt": prompt_r1,
+               "prompt_provenance": {"client": "layer-1", "template": "layer-2", "expert": None},
+               "generated_output": result_r1.text, "round": 1},
+              generation_run_id=run_r1.id)
+
+    # Apply overlay refinements
+    for i, overlay in enumerate(overlays, start=2):
+        prompt_refined = (
+            f"{prompt_r1.split('::', 1)[-1]}\n\n"
+            f"# Layer 3 — Expert revision instruction (round {i})\n"
+            f"{overlay}\n\n"
+            "Rewrite the section applying this instruction. Keep every factual claim traceable "
+            "to the dataset summary above.\n\n"
+            f"# Current draft\n"
+            f"{run_r1.generated_output}"
+        )
+        offline_refined = content.refine(run_r1.generated_output, overlay)
+        result_refined = llm.generate(prompt_refined, offline_refined, "offline", "offline", "")
+
+        run_r1.generated_output = result_refined.text
+        run_r1.round_number = i
+        run_r1.completed_at = datetime.utcnow()
+        db.commit()
+
+        log_event(db, engagement_id, "generation.refined", "user", "demo",
+                  {"instruction": overlay, "provider": "offline", "offline": True,
+                   "round": i, "resolved_prompt": prompt_refined,
+                   "generated_output": result_refined.text},
+                  generation_run_id=run_r1.id)
+
+
 def seed_demo_engagement(db) -> int:
     """Create the CGM / MDR / Spain demo engagement with its sample dataset."""
     engagement = Engagement(
@@ -197,6 +258,28 @@ def seed_demo_engagement(db) -> int:
         ),
     )
     # create_brief_v1 writes its own brief.submitted event — no second one here.
+
+    # Generate two key sections with refinement overlays to demonstrate prompt modification workflow
+    _generate_section_with_overlays(
+        db, engagement_id, "device-description",
+        [
+            "Emphasize the Spanish market entry timeline and AEMPS regulatory pathway. "
+            "Add a paragraph highlighting competitive advantages vs. other CGM systems in Spain.",
+            "Strengthen the language around the integrated bolus calculator as a differentiator. "
+            "Cite specific IEC 62304 classification language that regulators expect.",
+        ]
+    )
+
+    _generate_section_with_overlays(
+        db, engagement_id, "clinical-performance",
+        [
+            "Highlight the nocturnal hypoglycaemia detection rate as the key efficacy claim. "
+            "Downplay the MARD stat since it's at the endpoint threshold, not a standout.",
+            "Add specific references to the statistical endpoints table. "
+            "Frame the wear-time data as evidence of device reliability and patient acceptance.",
+        ]
+    )
+
     return engagement_id
 
 
