@@ -14,7 +14,15 @@ through EU MDR conformity assessment, launching in Spain.
 
 ## Run it
 
-**Quickest way:** use the launch script.
+**Easiest way:** just open the launcher in your browser.
+
+Double-click **`launch.html`** in the project folder (or open it in any browser).
+It will:
+- Check if the server is running
+- If yes: redirect instantly to the app
+- If no: show you how to start it, then auto-launch when ready
+
+**Or use the command-line launch scripts:**
 
 ```bash
 ./launch-demo.sh        # macOS / Linux
