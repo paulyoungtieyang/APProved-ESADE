@@ -96,6 +96,10 @@ def export_audit_trail_md(session: Session, engagement_id: int) -> str:
                 if payload.get('model'):
                     lines.append(f"- **Model:** {payload['model']}")
 
+                if event.event_type == 'generation.refined' and payload.get('instruction'):
+                    lines.append("\n### Expert Refinement Instruction")
+                    lines.append(payload['instruction'])
+
                 if payload.get('resolved_prompt'):
                     lines.append("\n### Prompt Sent to LLM")
                     prompt = payload['resolved_prompt']
