@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% import "_icons.html" as icons %}
+{% block title %}Trust & Data Handling{% endblock %}
+
+{% block content %}
+<div class="page page--lg">
+    <div class="page-header">
+        <h1>Trust &amp; Data Handling</h1>
+        <p>What a legal or compliance reviewer asks for before anyone uploads anything —
+           how generation works, where your data goes, and where human review sits.</p>
+    </div>
+
+    <div class="alert alert--blue">
+        {{ icons.icon("lock", 20) }}
+        <div class="flex-1">
+            <div class="alert__title">Read this before you start</div>
+            <div class="alert__body">
+                <p>This page is reachable without choosing a workspace, on purpose — it's meant
+                   to be shared with a reviewer before an engagement begins, not discovered
+                   after.</p>
+                <p class="mt-2">
+                    <a href="{{ url_for('download_methodology') }}" class="link-cta">
+                        {{ icons.icon("download", 16) }} Download as Markdown
+                    </a>
+                </p>
+            </div>
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="card__body">
+            <div class="output">{{ methodology | markdown | safe }}</div>
+        </div>
+    </div>
+</div>
+{% endblock %}

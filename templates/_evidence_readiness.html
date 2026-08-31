@@ -1,0 +1,37 @@
+{#
+  Evidence readiness strip — what's uploaded against the generic category list,
+  shown before generation rather than only discovered after it. Include with:
+
+    {% include "_evidence_readiness.html" %}
+
+  in any template that has `readiness` in its context (a list of dicts from
+  content.evidence_readiness(stats): id, label, description, present, count).
+#}
+{% import "_icons.html" as icons %}
+<div class="card mb-6">
+    <div class="card__header">
+        <h2 class="card__title">Evidence Readiness</h2>
+        <p class="card__subtitle">What's uploaded, stated up front — check this before generating.</p>
+    </div>
+    <div class="card__body">
+        <div class="readiness-grid">
+            {% for item in readiness %}
+                <div class="readiness-chip {{ 'is-present' if item.present else 'is-missing' }}"
+                     title="{{ item.description }}">
+                    <span class="readiness-chip__icon">
+                        {{ icons.icon("check-circle" if item.present else "circle", 16) }}
+                    </span>
+                    <span class="readiness-chip__label">{{ item.label }}</span>
+                    {% if item.present %}
+                        <span class="readiness-chip__count">{{ item.count }}</span>
+                    {% endif %}
+                </div>
+            {% endfor %}
+        </div>
+        <p class="text-xs text-faint mt-4">
+            None of these are required to generate — the offline engine says so explicitly
+            wherever evidence is missing rather than inventing a figure. This is about knowing
+            what you're missing before you read the output, not after.
+        </p>
+    </div>
+</div>

@@ -93,10 +93,12 @@ prototype 1:1.
 | Policy News | `/policy-news` | Filterable regulatory feed focused on MDR and Spanish market access |
 | Global Value Dossier | `/global-dossier` | Section-by-section generation with live progress, three-layer prompt composition |
 | MSL Materials | `/msl-material` | Slide decks, medical summaries, scientific FAQs, email templates. Upload a corporate `.pptx`/`.potx` here to brand generated decks |
+| Requirements Fit | `/requirements-fit` | Match evidence against any external requirement list — tender, HTA checklist, notified-body or partner due-diligence list — with per-requirement verdicts and gap argumentation |
 | Document Library | `/documents` | Everything generated, filtered by type / market / language. Decks download as `.pptx`, everything else as `.md` |
 | Resources | `/resources` | Regulations, guidance, standards and templates the drafts cite |
 | Submit | `/submission` | Five-step wizard: data → markets → languages → AI instructions → review |
 | Audit Trail | `/audit` | Append-only event log with full payloads |
+| Trust & Data Handling | `/trust` | Plain-language methodology and data-handling page — reachable without choosing a workspace, for a legal or compliance reviewer to read before an engagement starts |
 | Settings | `/settings` | Role-based access control matrix and provider key status |
 
 The header badge next to the role switcher always names the active workspace and doubles
@@ -151,6 +153,30 @@ to the offline draft rather than dead-ending.
 
 Live calls go over `urllib` from the standard library — there are no vendor SDKs to install
 or keep in sync.
+
+### Requirements Fit
+
+Match uploaded evidence against **any external requirement list** — a public tender, an
+HTA or formulary checklist, a notified-body or FDA pre-submission checklist, a partner
+due-diligence list. Nothing about it names a device, a market or a therapeutic area; that
+lives only in whatever requirement list and characteristics text you supply.
+
+Paste requirements one per line, or upload a file with a `Requirement` column (`core/requirements.py`
+also recognises `Requirement_ID`, `Category` and `Mandatory` columns if present). Each line
+gets a verdict — **Met**, **Partial**, or **Not addressed** — from keyword overlap against
+your uploaded evidence categories, your free-text "characteristics", and the brief, with
+argumentation text for anything short of a clean match. The matching is deliberately legible
+rather than clever, and says so on every report: it is a screening pass for expert review,
+not a filed answer.
+
+### Review & Approval
+
+Any generated document — a dossier section, an MSL material, a Requirements Fit report —
+can be submitted for review. A reviewer records a decision (**accept** / **revise** /
+**decline** / **amend the brief**) with written feedback; **accept** locks the document
+against further refinement until a later review reopens it. Enforced server-side on both the
+refine endpoint and the dossier regeneration endpoint — approval cannot be silently bypassed
+by regenerating the section again.
 
 ---
 
@@ -209,7 +235,10 @@ just hidden in the UI:
 | Compliance Officer | — | — | ✓ | — | — |
 
 The MSL text-modification lock is the compliance-critical one: field teams read and export
-approved materials but cannot alter them.
+approved materials but cannot alter them. "Approve" is also what gates submitting a review
+decision — only Administrator and Compliance Officer can accept, revise or decline a
+document; a document a reviewer accepts is then locked for everyone, including roles that
+can otherwise edit it.
 
 ---
 
@@ -223,6 +252,7 @@ core/
   audit.py              Append-only event log
   dataset.py            CSV/XLSX ingestion, checksums, derived statistics
   content.py            Reference data + the deterministic offline drafting engine
+  requirements.py       Device-agnostic requirements-fit matching engine
   llm.py                Provider layer (offline / Anthropic / OpenAI / Google)
   deck.py               PowerPoint generation against an uploaded brand template
   gates.py              Consent and data-quality gates

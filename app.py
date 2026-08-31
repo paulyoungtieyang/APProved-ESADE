@@ -24,6 +24,7 @@ from __future__ import annotations
 import io
 import json
 import os
+import re
 import shutil
 from datetime import datetime
 from threading import Timer
@@ -35,11 +36,12 @@ from flask import (
 from sqlalchemy.orm import sessionmaker
 
 from core import audit, content, dataset, deck, llm
+from core import requirements as reqs
 from core.audit import log_event, get_engagement_trail
 from core.briefs import brief_as_dict, create_brief_v1, get_latest_brief
 from core.gates import consent_gate
 from core.models import (
-    AuditEvent, BriefVersion, Engagement, GenerationRun, UploadedFile, init_db
+    AuditEvent, BriefVersion, Engagement, GenerationRun, ReviewRound, UploadedFile, init_db
 )
 
 # --------------------------------------------------------------------------
@@ -71,6 +73,7 @@ SAMPLE_FILES = [
     ("efficacy_analysis.csv", "efficacy"),
     ("bolus_calculator_spec.csv", "software"),
     ("bolus_calculator_verification.csv", "verification"),
+    ("example_requirement_checklist.csv", "requirements"),
 ]
 
 # The demo ships a stand-in corporate deck template so the "generate a branded
@@ -79,8 +82,10 @@ SAMPLE_BRAND_TEMPLATE = os.path.join("brand", "acme_medical_corporate_template.p
 
 # Routes reachable before a workspace has been chosen. Everything else redirects
 # to the landing page until the visitor picks "the tool" or "the demo" — see
-# require_workspace() below.
-PUBLIC_ENDPOINTS = {"landing", "enter_tool", "enter_demo", "static"}
+# require_workspace() below. Trust & Data Handling is deliberately public too:
+# it is the page a legal or compliance reviewer reads before anyone uploads
+# anything, so it cannot be gated behind starting an engagement.
+PUBLIC_ENDPOINTS = {"landing", "enter_tool", "enter_demo", "trust_center", "download_methodology", "static"}
 
 # Every item here is APProved functionality. Client device features — the demo
 # device's bolus calculator, for instance — are never pages in this app; they are
@@ -94,12 +99,14 @@ NAV_ITEMS = [
     {"section": "Generate"},
     {"name": "Global Value Dossier", "endpoint": "global_dossier", "icon": "file-stack"},
     {"name": "MSL Materials", "endpoint": "msl_material", "icon": "message-square"},
+    {"name": "Requirements Fit", "endpoint": "requirements_fit", "icon": "clipboard-list"},
     {"section": "Deliver"},
     {"name": "Document Library", "endpoint": "documents", "icon": "folder-open"},
     {"name": "Resources", "endpoint": "resources", "icon": "book-open"},
     {"name": "Submit", "endpoint": "submission", "icon": "send"},
     {"section": "Governance"},
     {"name": "Audit Trail", "endpoint": "audit_trail", "icon": "history"},
+    {"name": "Trust & Data Handling", "endpoint": "trust_center", "icon": "lock"},
     {"name": "Settings", "endpoint": "settings", "icon": "settings"},
 ]
 
@@ -187,6 +194,109 @@ def _generate_section_with_overlays(db, engagement_id: int, section_id: str, ove
                    "generated_output": result_refined.text},
                   generation_run_id=run_r1.id)
 
+    return run_r1
+
+
+def _run_requirements_fit(
+    db, engagement_id: int, label: str, requirements: list[dict], characteristics: str,
+    provider: str = "offline", model: str | None = None, api_key: str = "",
+    actor: str = "demo",
+) -> GenerationRun | None:
+    """
+    Shared by the /requirements-fit route and demo seeding, so both exercise exactly
+    the same matching and drafting logic in core.requirements — nothing here is
+    device- or market-specific; that lives only in whatever `requirements` and
+    `characteristics` the caller supplies.
+    """
+    if not requirements:
+        return None
+
+    brief = brief_as_dict(get_latest_brief(db, engagement_id))
+    stats = dataset_stats(db, engagement_id)
+
+    matches = reqs.match_requirements(requirements, brief, stats, characteristics)
+    prompt = reqs.build_requirements_prompt(label, requirements, matches, characteristics, brief)
+    offline_draft = reqs.draft_requirements_report(label, requirements, matches, characteristics)
+    model = model or llm.PROVIDERS.get(provider, {}).get("models", ["offline"])[0]
+    result = llm.generate(prompt, offline_draft, provider, model, api_key)
+
+    latest_brief = get_latest_brief(db, engagement_id)
+    provenance = {"client": "layer-1", "template": "layer-2",
+                  "expert": "layer-3" if characteristics.strip() else None}
+    run = GenerationRun(
+        engagement_id=engagement_id,
+        brief_version_id=latest_brief.id,
+        round_number=1,
+        deliverable_type="requirements-fit",
+        title=f"Requirements Fit — {label}",
+        resolved_prompt=prompt,
+        prompt_provenance=provenance,
+        provider=result.provider,
+        model=result.model,
+        generated_output=result.text,
+        status="completed",
+        completed_at=datetime.utcnow(),
+        created_by=actor,
+    )
+    db.add(run)
+    db.commit()
+
+    counts = reqs.summarise_matches(matches)
+    log_event(db, engagement_id, "generation.completed", "user", actor,
+              {"deliverable": "requirements-fit", "label": label, "provider": result.provider,
+               "model": result.model, "offline": result.offline,
+               "resolved_prompt": prompt, "prompt_provenance": provenance,
+               "generated_output": result.text, "round": 1,
+               "requirement_count": counts["total"], "met": counts["Met"],
+               "partial": counts["Partial"], "not_addressed": counts["Not addressed"]},
+              generation_run_id=run.id)
+
+    return run
+
+
+def _submit_review(
+    db, engagement_id: int, run: GenerationRun, decision: str, feedback_text: str,
+    round_type: str = "internal_expert", reviewer: str = "demo",
+) -> ReviewRound:
+    """
+    Record one review round and apply its consequence: "accept" locks the run
+    against further refinement, and a later round with any other decision reopens
+    a previously-approved run. Shared by the review route and demo seeding.
+    """
+    review = ReviewRound(
+        engagement_id=engagement_id,
+        generation_run_id=run.id,
+        round_type=round_type,
+        reviewed_by=reviewer,
+        feedback_text=feedback_text or None,
+        decision=decision,
+    )
+    db.add(review)
+    db.commit()
+
+    was_approved = bool(run.approved_at)
+    if decision == "accept":
+        run.approved_at = datetime.utcnow()
+        run.approved_by = reviewer
+        db.commit()
+    elif was_approved:
+        run.approved_at = None
+        run.approved_by = None
+        db.commit()
+
+    log_event(db, engagement_id, "review.submitted", "user", reviewer,
+              {"decision": decision, "feedback_text": feedback_text, "round_type": round_type},
+              generation_run_id=run.id, review_round_id=review.id)
+
+    if decision == "accept":
+        log_event(db, engagement_id, "document.approved", "user", reviewer,
+                  {"title": run.title or run.deliverable_type}, generation_run_id=run.id)
+    elif was_approved:
+        log_event(db, engagement_id, "document.reopened", "user", reviewer,
+                  {"reason": decision}, generation_run_id=run.id)
+
+    return review
+
 
 def seed_demo_engagement(db) -> int:
     """Create the CGM / MDR / Spain demo engagement with its sample dataset."""
@@ -260,7 +370,7 @@ def seed_demo_engagement(db) -> int:
     # create_brief_v1 writes its own brief.submitted event — no second one here.
 
     # Generate two key sections with refinement overlays to demonstrate prompt modification workflow
-    _generate_section_with_overlays(
+    device_run = _generate_section_with_overlays(
         db, engagement_id, "device-description",
         [
             "Emphasize the Spanish market entry timeline and AEMPS regulatory pathway. "
@@ -270,8 +380,8 @@ def seed_demo_engagement(db) -> int:
         ]
     )
 
-    _generate_section_with_overlays(
-        db, engagement_id, "clinical-performance",
+    efficacy_run = _generate_section_with_overlays(
+        db, engagement_id, "clinical-efficacy",
         [
             "Highlight the nocturnal hypoglycaemia detection rate as the key efficacy claim. "
             "Downplay the MARD stat since it's at the endpoint threshold, not a standout.",
@@ -279,6 +389,44 @@ def seed_demo_engagement(db) -> int:
             "Frame the wear-time data as evidence of device reliability and patient acceptance.",
         ]
     )
+
+    # Seed the review & approval workflow: one section signed off and locked, the
+    # other sent back with feedback — showing both outcomes the workflow supports.
+    if device_run:
+        _submit_review(
+            db, engagement_id, device_run, decision="accept",
+            feedback_text="Classification language checked against MDCG 2019-11 — accurate. "
+                          "Spanish market entry framing is appropriately scoped. Approved.",
+            round_type="internal_expert", reviewer="medical-writer",
+        )
+    if efficacy_run:
+        _submit_review(
+            db, engagement_id, efficacy_run, decision="revise",
+            feedback_text="Nocturnal hypoglycaemia framing is good, but the indirect-comparison "
+                          "caveat needs to appear before the comparative claim, not after it. "
+                          "Please revise and resubmit.",
+            round_type="internal_expert", reviewer="compliance",
+        )
+
+    # Seed the requirements-fit engine against the sample external-requirements
+    # checklist uploaded above, so the demo shows a real, engagement-specific run
+    # of a capability that works against any requirement list, not just this one.
+    requirements_file = os.path.join(SAMPLE_DIR, "example_requirement_checklist.csv")
+    if os.path.exists(requirements_file):
+        table = dataset.read_table(requirements_file)
+        parsed_requirements = reqs.parse_requirements_table(table["rows"])
+        _run_requirements_fit(
+            db, engagement_id,
+            label="Example Regional Procurement Checklist",
+            requirements=parsed_requirements,
+            characteristics=(
+                "Two regulated functions — a hardware sensor and a companion dosing-support "
+                "application — documented under a single conformity assessment. Local-language "
+                "interface and labelling prepared for the target market. Real-world evidence "
+                "collection is planned in the post-market surveillance plan but not yet executed."
+            ),
+            actor="demo",
+        )
 
     return engagement_id
 
@@ -457,6 +605,9 @@ def file_size_label(num_bytes: int) -> str:
     return f"{size:.1f} GB"
 
 
+_TABLE_SEPARATOR_CELL = re.compile(r"^:?-{2,}:?$")
+
+
 def markdown_to_html(text: str) -> str:
     """
     Minimal Markdown renderer — enough for the drafts this app produces.
@@ -465,11 +616,18 @@ def markdown_to_html(text: str) -> str:
     lines. Continuation lines are folded into the block they belong to; rendering
     each source line independently would scatter stray <p> fragments between the
     list items.
+
+    Tables (GFM-style `| a | b |` rows with a `|---|---|` separator) are the one
+    block type where lines are structurally significant rather than wrapped —
+    each row is kept as its own <tr>, never folded into a paragraph.
     """
     from markupsafe import escape
 
     html: list[str] = []
     in_list = False
+    in_table = False
+    table_header: list[str] | None = None
+    table_rows: list[list[str]] = []
     buffer: list[str] = []
     kind: str | None = None          # "p" | "li" | "quote"
 
@@ -501,26 +659,63 @@ def markdown_to_html(text: str) -> str:
             html.append("</ul>")
             in_list = False
 
+    def close_table():
+        nonlocal in_table, table_header, table_rows
+        if not in_table:
+            return
+        html.append('<div class="table-wrap"><table class="md-table">')
+        if table_header:
+            html.append("<thead><tr>"
+                         + "".join(f"<th>{inline(cell)}</th>" for cell in table_header)
+                         + "</tr></thead>")
+        html.append("<tbody>")
+        for row in table_rows:
+            html.append("<tr>" + "".join(f"<td>{inline(cell)}</td>" for cell in row) + "</tr>")
+        html.append("</tbody></table></div>")
+        in_table, table_header, table_rows = False, None, []
+
+    def close_open_blocks():
+        close_list()
+        close_table()
+
+    def parse_table_row(line: str) -> list[str]:
+        trimmed = line[1:] if line.startswith("|") else line
+        trimmed = trimmed[:-1] if trimmed.endswith("|") else trimmed
+        return [cell.strip() for cell in trimmed.split("|")]
+
     for raw in (text or "").split("\n"):
         stripped = raw.strip()
 
         if not stripped:
+            close_open_blocks()
+            continue
+
+        if stripped.startswith("|") and stripped.count("|") >= 2:
             close_list()
+            cells = parse_table_row(stripped)
+            if not in_table:
+                in_table = True
+                table_header = cells
+            elif not table_rows and all(_TABLE_SEPARATOR_CELL.match(c) for c in cells if c):
+                pass  # the "|---|---|" header-separator row — not data
+            else:
+                table_rows.append(cells)
             continue
 
         if stripped.startswith("---"):
-            close_list()
+            close_open_blocks()
             html.append("<hr>")
             continue
 
         if stripped.startswith("#"):
-            close_list()
+            close_open_blocks()
             level = min(len(stripped) - len(stripped.lstrip("#")), 4)
             html.append(f"<h{level}>{inline(stripped.lstrip('#').strip())}</h{level}>")
             continue
 
         if stripped.startswith(("- ", "* ", "• ")):
             flush()
+            close_table()
             if not in_list:
                 html.append("<ul>")
                 in_list = True
@@ -528,7 +723,7 @@ def markdown_to_html(text: str) -> str:
             continue
 
         if stripped.startswith("> "):
-            close_list()
+            close_open_blocks()
             buffer, kind = [stripped[2:].strip()], "quote"
             continue
 
@@ -536,10 +731,10 @@ def markdown_to_html(text: str) -> str:
         if kind:
             buffer.append(stripped)
         else:
-            close_list()
+            close_open_blocks()
             buffer, kind = [stripped], "p"
 
-    close_list()
+    close_open_blocks()
     return "\n".join(html)
 
 
@@ -772,7 +967,8 @@ def upload():
                 flash(f"Rejected {note}", "error")
             return redirect(url_for("upload"))
 
-        return render_template("upload.html", brief=brief, stats=stats)
+        return render_template("upload.html", brief=brief, stats=stats,
+                                readiness=content.evidence_readiness(stats))
     finally:
         db.close()
 
@@ -901,6 +1097,7 @@ def global_dossier():
             markets=content.MARKETS,
             languages=content.LANGUAGES,
             completed_count=len(generated),
+            readiness=content.evidence_readiness(stats),
         )
     finally:
         db.close()
@@ -922,6 +1119,19 @@ def api_generate_section():
         engagement_id, brief, stats = engagement_context(db)
         latest_brief = get_latest_brief(db, engagement_id)
 
+        existing = (
+            db.query(GenerationRun)
+            .filter_by(engagement_id=engagement_id, deliverable_type="gvd")
+            .filter(GenerationRun.resolved_prompt.like(f"{section_id}::%"))
+            .first()
+        )
+        if existing and existing.approved_at:
+            return jsonify({
+                "error": f"Approved by {existing.approved_by} on "
+                         f"{existing.approved_at.strftime('%b %d, %Y')} — locked. Submit a "
+                         "review with a 'Revise' decision to reopen it before regenerating."
+            }), 409
+
         overlay = (payload.get("overlay") or "").strip()
         provider = payload.get("provider", "offline")
         model = payload.get("model") or llm.PROVIDERS.get(provider, {}).get("models", ["offline"])[0]
@@ -931,12 +1141,6 @@ def api_generate_section():
         offline_draft = content.draft_section(section_id, brief, stats, overlay)
         result = llm.generate(prompt, offline_draft, provider, model, api_key)
 
-        existing = (
-            db.query(GenerationRun)
-            .filter_by(engagement_id=engagement_id, deliverable_type="gvd")
-            .filter(GenerationRun.resolved_prompt.like(f"{section_id}::%"))
-            .first()
-        )
         round_number = (existing.round_number + 1) if existing else 1
 
         run = GenerationRun(
@@ -1028,6 +1232,12 @@ def refine_generation(run_id):
             flash(f"{content.ROLE_LABELS[current_role()]} cannot edit documents.", "error")
             return redirect(request.referrer or url_for("documents"))
 
+        if run.approved_at:
+            flash(f"Approved by {run.approved_by} on {run.approved_at.strftime('%b %d, %Y')} — "
+                  "locked. Submit a review with a 'Revise' decision to reopen it before refining.",
+                  "error")
+            return redirect(request.referrer or url_for("document_detail", run_id=run.id))
+
         instruction = (request.form.get("instruction") or "").strip()
         if not instruction:
             flash("Describe what to change before refining.", "error")
@@ -1066,6 +1276,47 @@ def refine_generation(run_id):
         flash(result.note or f"Refined — now at round {run.round_number}.",
               "error" if result.note else "success")
         return redirect(request.referrer or url_for("documents"))
+    finally:
+        db.close()
+
+
+@app.route("/generation/<int:run_id>/review", methods=["POST"])
+def submit_review(run_id):
+    """
+    Record a review decision against a generation run. Generic across every
+    deliverable type — a dossier section, an MSL material, a requirements-fit
+    report all go through the same accept / revise / decline / amend_brief
+    decision, and "accept" locks the run the same way regardless of what it is.
+    """
+    db = get_db()
+    try:
+        engagement_id = active_engagement_id(db)
+        run = db.get(GenerationRun, run_id)
+        if not run or run.engagement_id != engagement_id:
+            flash("Generation not found.", "error")
+            return redirect(url_for("documents"))
+
+        if not can("approve_documents"):
+            flash(f"{content.ROLE_LABELS[current_role()]} cannot approve documents.", "error")
+            return redirect(request.referrer or url_for("document_detail", run_id=run.id))
+
+        decision = request.form.get("decision", "")
+        if decision not in ("accept", "revise", "decline", "amend_brief"):
+            flash("Choose a decision before submitting the review.", "error")
+            return redirect(request.referrer or url_for("document_detail", run_id=run.id))
+
+        round_type = request.form.get("round_type", "internal_expert")
+        if round_type not in ("internal_expert", "client"):
+            round_type = "internal_expert"
+        feedback_text = (request.form.get("feedback_text") or "").strip()
+
+        _submit_review(db, engagement_id, run, decision, feedback_text,
+                        round_type=round_type, reviewer=current_role())
+
+        labels = {"accept": "Approved and locked", "revise": "Sent back for revision",
+                   "decline": "Declined", "amend_brief": "Flagged to amend the brief"}
+        flash(labels.get(decision, "Review recorded."), "success")
+        return redirect(request.referrer or url_for("document_detail", run_id=run.id))
     finally:
         db.close()
 
@@ -1226,6 +1477,80 @@ def msl_material():
             providers=llm.PROVIDERS,
             templates=brand_templates(db, engagement_id),
             generated=generated_run,
+            readiness=content.evidence_readiness(stats),
+        )
+    finally:
+        db.close()
+
+
+# --------------------------------------------------------------------------
+# Requirements fit — match uploaded evidence against any external requirement
+# list (a tender, an HTA/formulary checklist, a notified-body or partner
+# due-diligence list). Device- and market-agnostic: nothing below names one.
+# --------------------------------------------------------------------------
+
+
+@app.route("/requirements-fit", methods=["GET", "POST"])
+def requirements_fit():
+    db = get_db()
+    try:
+        engagement_id, brief, stats = engagement_context(db)
+
+        if request.method == "POST":
+            if not can("edit_documents"):
+                flash(f"{content.ROLE_LABELS[current_role()]} cannot generate documents.", "error")
+                return redirect(url_for("requirements_fit"))
+
+            label = (request.form.get("label") or "").strip() or "Untitled requirement set"
+            characteristics = request.form.get("characteristics", "")
+            source_mode = request.form.get("source_mode", "paste")
+
+            if source_mode == "file":
+                file_id = request.form.get("requirements_file_id", "")
+                record = db.get(UploadedFile, int(file_id)) if file_id.isdigit() else None
+                if not record or record.engagement_id != engagement_id:
+                    flash("Choose an uploaded requirements file first.", "error")
+                    return redirect(url_for("requirements_fit"))
+                path = os.path.join(UPLOAD_DIR, record.file_path)
+                table = dataset.read_table(path) if os.path.exists(path) else {"rows": []}
+                parsed = reqs.parse_requirements_table(table["rows"])
+            else:
+                parsed = reqs.parse_requirements_text(request.form.get("requirements_text", ""))
+
+            if not parsed:
+                flash("No requirements found — paste one per line, or choose a file with a "
+                      "'Requirement' column.", "error")
+                return redirect(url_for("requirements_fit"))
+
+            provider = request.form.get("provider", "offline")
+            model = request.form.get("model") or llm.PROVIDERS.get(provider, {}).get("models", ["offline"])[0]
+            api_key = request.form.get("api_key", "")
+
+            run = _run_requirements_fit(
+                db, engagement_id, label, parsed, characteristics,
+                provider=provider, model=model, api_key=api_key, actor=current_role(),
+            )
+            return redirect(url_for("document_detail", run_id=run.id))
+
+        requirements_files = [
+            entry for entry in stats.get("files", [])
+            if entry.get("category") == "requirements" and not entry.get("error")
+        ]
+        previous_runs = (
+            db.query(GenerationRun)
+            .filter_by(engagement_id=engagement_id, deliverable_type="requirements-fit")
+            .order_by(GenerationRun.created_at.desc())
+            .all()
+        )
+
+        return render_template(
+            "requirements_fit.html",
+            brief=brief,
+            stats=stats,
+            requirements_files=requirements_files,
+            previous_runs=previous_runs,
+            providers=llm.PROVIDERS,
+            readiness=content.evidence_readiness(stats),
         )
     finally:
         db.close()
@@ -1258,13 +1583,26 @@ def documents():
         items = []
         for run in runs:
             key = run.resolved_prompt.split("::")[0]
-            if run.deliverable_type == "gvd":
+            if run.title:
+                # Newer deliverable types (requirements-fit) set a real title rather
+                # than growing the "<key>::" prefix convention further.
+                doc_type = "Requirements Fit" if run.deliverable_type == "requirements-fit" else run.deliverable_type
+                title = run.title
+            elif run.deliverable_type == "gvd":
                 doc_type = "Global Value Dossier"
                 title = f"GVD — {content.SECTION_BY_ID.get(key, {}).get('title', key)}"
             else:
                 doc_type = "MSL Material"
                 title = content.MSL_MATERIAL_BY_ID.get(run.deliverable_type, {}).get(
                     "name", run.deliverable_type)
+
+            if run.approved_at:
+                approval_status = "Approved"
+            elif run.round_number > 1:
+                approval_status = "Final"
+            else:
+                approval_status = "Draft"
+
             items.append({
                 "id": run.id,
                 "title": title,
@@ -1273,7 +1611,9 @@ def documents():
                 "language": languages[0],
                 "date": run.created_at,
                 "size": file_size_label(len((run.generated_output or "").encode("utf-8"))),
-                "status": "Final" if run.round_number > 1 else "Draft",
+                "status": approval_status,
+                "approved": bool(run.approved_at),
+                "approved_by": run.approved_by,
                 "provider": run.provider,
                 "model": run.model,
                 "round": run.round_number,
@@ -1315,18 +1655,36 @@ def document_detail(run_id):
             return redirect(url_for("documents"))
 
         key = run.resolved_prompt.split("::")[0]
-        title = (content.SECTION_BY_ID.get(key, {}).get("title")
+        title = (run.title
+                 or content.SECTION_BY_ID.get(key, {}).get("title")
                  or content.MSL_MATERIAL_BY_ID.get(run.deliverable_type, {}).get("name")
                  or run.deliverable_type)
+
+        if run.deliverable_type == "gvd":
+            subtitle = "Global Value Dossier section"
+        elif run.deliverable_type == "requirements-fit":
+            subtitle = "Requirements fit analysis"
+        else:
+            subtitle = "MSL material"
+
+        review_rounds = (
+            db.query(ReviewRound)
+            .filter_by(generation_run_id=run.id)
+            .order_by(ReviewRound.created_at.desc())
+            .all()
+        )
 
         return render_template(
             "generation_result.html",
             title=title,
-            subtitle="Global Value Dossier section" if run.deliverable_type == "gvd" else "MSL material",
+            subtitle=subtitle,
             run={"id": run.id, "provider": run.provider, "model": run.model,
                  "round": run.round_number, "created_at": run.created_at,
                  "output": run.generated_output,
-                 "prompt": run.resolved_prompt.split("::", 1)[-1]},
+                 "prompt": run.resolved_prompt.split("::", 1)[-1],
+                 "approved_at": run.approved_at, "approved_by": run.approved_by},
+            review_rounds=review_rounds,
+            can_approve=can("approve_documents"),
             back_url=url_for("documents"),
             brief=brief,
         )
@@ -1347,8 +1705,13 @@ def download_document(run_id):
             flash(f"{content.ROLE_LABELS[current_role()]} cannot export documents.", "error")
             return redirect(url_for("documents"))
 
-        key = run.resolved_prompt.split("::")[0]
-        stem = f"approved_{run.deliverable_type}_{key}_r{run.round_number}"
+        # `key` is only a short slug when resolved_prompt uses the "<key>::" prefix
+        # (gvd sections, msl materials). Newer types set `title` instead and carry
+        # no prefix at all — falling through to the old logic there would slugify
+        # the entire multi-thousand-character prompt into the filename.
+        key = run.resolved_prompt.split("::")[0] if "::" in run.resolved_prompt else ""
+        slug = re.sub(r"[^a-z0-9]+", "-", (run.title or key or run.deliverable_type).lower()).strip("-")[:60]
+        stem = f"approved_{run.deliverable_type}_{slug}_r{run.round_number}"
 
         # A slide deck is exported as a real .pptx, rendered into the client's own
         # brand template when one was chosen. Everything else exports as Markdown.
@@ -1549,6 +1912,27 @@ def download_audit_trail():
         )
     finally:
         db.close()
+
+
+@app.route("/trust")
+def trust_center():
+    """
+    Plain-language methodology and data-handling page — what a legal or
+    compliance reviewer asks for before anyone is allowed to use this. Purely
+    informational: no engagement data, no permission check.
+    """
+    return render_template("trust.html", methodology=content.build_methodology_markdown())
+
+
+@app.route("/trust/download")
+def download_methodology():
+    md = content.build_methodology_markdown()
+    return send_file(
+        io.BytesIO(md.encode('utf-8')),
+        mimetype='text/markdown',
+        as_attachment=True,
+        download_name="approved_methodology.md",
+    )
 
 
 # --------------------------------------------------------------------------

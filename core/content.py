@@ -23,6 +23,141 @@ from __future__ import annotations
 from typing import Any
 
 # ==========================================================================
+# Evidence categories — generic across every engagement, not demo-specific.
+#
+# These are the same category strings `core.dataset.classify()` assigns and the
+# upload category dropdown offers. Unlike DEVICE_COMPONENTS below, nothing here
+# names a device, a market or a therapeutic area — the same eight categories
+# describe the evidence base for a diagnostic, a drug-device combination, an
+# app, or a piece of lab equipment.
+# ==========================================================================
+
+EVIDENCE_CATEGORIES = [
+    {"id": "clinical", "label": "Clinical / performance data",
+     "description": "The primary dataset the generated evidence is grounded in."},
+    {"id": "safety", "label": "Safety monitoring",
+     "description": "Adverse event or safety-signal records."},
+    {"id": "efficacy", "label": "Efficacy endpoints",
+     "description": "Endpoint-level statistical results — value, confidence interval, p-value."},
+    {"id": "demographics", "label": "Demographics & baseline",
+     "description": "Cohort baseline characteristics."},
+    {"id": "economics", "label": "Health economics",
+     "description": "Cost, budget-impact or reimbursement-relevant figures."},
+    {"id": "software", "label": "Software specification",
+     "description": "Specification for any digital or software component, where one exists."},
+    {"id": "verification", "label": "Software verification",
+     "description": "Test or verification records for a digital component, where one exists."},
+    {"id": "requirements", "label": "External requirements",
+     "description": "A tender, an HTA/formulary checklist, a notified-body or partner "
+                    "due-diligence list — anything to match evidence against."},
+    {"id": "brand", "label": "Brand template",
+     "description": "A corporate PowerPoint template used to brand exported slide decks."},
+]
+
+EVIDENCE_CATEGORY_BY_ID = {item["id"]: item for item in EVIDENCE_CATEGORIES}
+
+
+def evidence_readiness(stats: dict) -> list[dict]:
+    """
+    What evidence has been uploaded, against the generic category list above.
+
+    Answers "what should I bring before I start" up front, on the pages where
+    generation actually happens, rather than only after something fails.
+    """
+    counts: dict[str, int] = {}
+    for entry in stats.get("files") or []:
+        category = entry.get("category")
+        if category and not entry.get("error"):
+            counts[category] = counts.get(category, 0) + 1
+
+    return [
+        {**category, "present": category["id"] in counts, "count": counts.get(category["id"], 0)}
+        for category in EVIDENCE_CATEGORIES
+    ]
+
+
+# ==========================================================================
+# Platform methodology — generic, static, no per-engagement data. What a
+# client's legal or compliance reviewer asks for before they will let anyone
+# use this: how generation actually works and what happens to their data.
+# ==========================================================================
+
+def build_methodology_markdown() -> str:
+    return """# APProved — Methodology & Data Handling
+
+This is a plain-language description of how document generation works and what
+happens to the data you upload — written to be handed to a legal or compliance
+reviewer before an engagement starts, not just discovered by reading the code.
+
+## How a document gets written
+
+Every generation composes a prompt from three layers, kept visibly separate and
+stored with the output so any sentence can be traced back to where it came from:
+
+1. **Client baseline** — the signed brief: markets, frameworks, tone, audience,
+   key messages. Set once per brief version; changing it creates a new version
+   rather than silently overwriting the old one.
+2. **Deliverable template** — the structure and evidence rules for whichever
+   section or material is being written. The same for every engagement.
+3. **Expert overlay** — optional emphasis or correction supplied for this run.
+
+The model is instructed to cite only figures present in the uploaded dataset
+summary and to say so explicitly when something is not reported, rather than
+inventing a plausible-sounding number. The offline drafting engine — the
+default, with no API key required — enforces this the same way: it is a fixed
+set of deterministic templates that read the uploaded rows and fill in what is
+actually there, nothing else.
+
+## Where your data goes
+
+- **Offline by default.** With no provider key supplied, generation never
+  leaves this host. There is no network call.
+- **A key is opt-in, per request.** Supplying an API key switches that one
+  generation call to a live provider over HTTPS. The key is used for that
+  single request and is never written to the database, the audit trail, or
+  any log.
+- **Every upload is checksummed.** SHA-256 on receipt, stored and shown in the
+  UI, so a file's integrity is independently verifiable at any later point.
+- **Nothing is used for model training.** Whatever provider is called, the
+  request is a normal API call — not a fine-tuning or training submission.
+
+## Where human review sits
+
+Generation output is not a final answer by default. A document can be
+submitted for review by anyone with approval permission, who records a
+decision — accept, revise, decline, or amend the brief — and written feedback.
+An **accepted** document is locked: no further refinement is possible until a
+new review round reopens it. This mirrors the internal-committee pattern most
+regulated organisations already run (medical, regulatory, legal sign-off)
+rather than replacing it.
+
+## What is logged
+
+Every action — upload, brief revision, generation, refinement, review decision,
+export — is written to an append-only audit trail: nothing is ever updated or
+deleted, only added. Each entry carries the actor, the timestamp, and the full
+payload (including the resolved prompt and generated output for a generation
+event), with the one deliberate exception of API key material, which is never
+captured. The complete trail for an engagement can be exported as a single
+Markdown document for external review.
+
+## Role-based access
+
+Permissions are enforced server-side, not just hidden in the interface. A role
+without upload rights gets a 403 from the upload endpoint if it tries anyway,
+the same as it would from any other client. What a role can see or do does not
+depend on which buttons happen to be rendered.
+
+## What this is not
+
+This document describes the mechanism, not a certification. It is not a legal
+opinion, a DPA, or a substitute for your own review of a specific engagement's
+data. Generated drafts require expert review before any regulatory or
+commercial use.
+"""
+
+
+# ==========================================================================
 # Device components — the hardware / digital split the demo exists to show
 # ==========================================================================
 

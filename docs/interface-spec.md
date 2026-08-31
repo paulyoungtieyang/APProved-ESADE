@@ -68,7 +68,7 @@ fields, the progress panel and every collapsible section.
 - **Sidebar** — `16rem`, sticky under the header, visible from `lg:` up. Active item is
   `blue-50` background with `blue-700` text. Navigation is grouped under small uppercase
   section labels (Workspace / Generate / Deliver / Governance) — an addition to the Figma,
-  needed because the Flask app has 12 destinations rather than 10.
+  needed because the Flask app has 13 destinations rather than 10.
 - **Main** — `flex-1`, padding steps `1rem → 1.5rem → 2rem` across breakpoints.
 
 Breakpoints follow Tailwind: `640px`, `768px`, `1024px`, `1280px`.
@@ -143,6 +143,8 @@ matters is a `<symbol>` sprite in `base.html` plus `<use>` references.
 | `SettingsPage` | `settings` | Same RBAC matrix, plus a provider/key status panel. Permissions are enforced server-side. |
 | — | `landing` / `enter_tool` | **New.** A fork before any engagement exists: the blank tool, or the pre-loaded CGM demo. The only pages without the sidebar shell. |
 | — | `audit_trail` | **New.** The append-only log the compliance story depends on. |
+| — | `requirements_fit` | **New.** Device- and market-agnostic requirements-fit matching (`core/requirements.py`) — no Figma equivalent; the Figma prototype has no concept of an external requirement list. |
+| — | `trust_center` | **New.** Plain-language methodology and data-handling page. The other exception to "no sidebar shell without a workspace" — reachable from the landing page footnote before any engagement starts. |
 
 ---
 

@@ -55,7 +55,8 @@
                         <span class="badge badge--purple">{{ item.type }}</span>
                         <span class="badge badge--blue">{{ item.market }}</span>
                         <span class="badge badge--green">{{ icons.icon("globe", 12) }} {{ item.language }}</span>
-                        <span class="badge {% if item.status == 'Final' %}badge--green{% else %}badge--amber{% endif %}">
+                        <span class="badge {% if item.status in ('Final', 'Approved') %}badge--green{% else %}badge--amber{% endif %}">
+                            {% if item.approved %}{{ icons.icon("lock", 12) }}{% endif %}
                             {{ item.status }}
                         </span>
                     </div>

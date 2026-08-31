@@ -10,6 +10,8 @@
            in the same pivotal dataset as the dossier.</p>
     </div>
 
+    {% include "_evidence_readiness.html" %}
+
     {# Declared outside the main form so the file input inside it can reference this
        via form="brandUploadForm" — nested <form> elements are invalid HTML. #}
     <form method="POST" action="{{ url_for('upload_brand_template') }}"

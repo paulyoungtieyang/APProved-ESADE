@@ -1,0 +1,10 @@
+Requirement_ID,Requirement,Category,Mandatory,Source
+REQ-01,"Clinical performance data reported against a recognised reference method, with confidence intervals",Clinical,Yes,Example regional procurement checklist
+REQ-02,"Adverse event and safety monitoring data provided for the evaluated population",Safety,Yes,Example regional procurement checklist
+REQ-03,"Statistical significance demonstrated for the primary efficacy endpoint",Efficacy,Yes,Example regional procurement checklist
+REQ-04,"Software specification and verification test records provided, mapped to a recognised lifecycle standard",Software,No,Example regional procurement checklist
+REQ-05,"Demographic and baseline characteristics of the evaluated population summarised separately from performance data",Demographics,No,Example regional procurement checklist
+REQ-06,"Cost-effectiveness or budget-impact analysis submitted for the target purchaser",Economics,Yes,Example regional procurement checklist
+REQ-07,"Real-world evidence beyond the pivotal study is available on request",Clinical,No,Example regional procurement checklist
+REQ-08,"Local-language user documentation is provided for the target market",Other,Yes,Example regional procurement checklist
+REQ-09,"A named point of contact for post-market issue reporting is designated",Other,No,Example regional procurement checklist

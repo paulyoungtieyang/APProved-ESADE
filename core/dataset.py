@@ -277,6 +277,11 @@ def classify(filename: str, columns: list[str]) -> str:
         return "brand"
     if any(token in haystack for token in ("brand", "template", "corporate", "style guide")):
         return "brand"
+    # An external requirement list — a tender, an HTA/formulary checklist, a
+    # notified-body or partner due-diligence checklist. Checked early: these
+    # words are distinctive and wouldn't otherwise appear in clinical files.
+    if any(token in haystack for token in ("tender", "criteria", "criterion", "checklist")):
+        return "requirements"
     # Device software documentation — specification and verification records.
     if any(token in haystack for token in ("test_id", "verification", "expected_dose")):
         return "verification"

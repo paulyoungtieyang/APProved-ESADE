@@ -109,6 +109,12 @@ class GenerationRun(Base):
     round_number = Column(Integer, nullable=False)  # which refinement round
     deliverable_type = Column(String(50), nullable=False)  # gvd, slide_deck, summary, etc.
 
+    # Human label for this run. Dossier sections and MSL materials still derive their
+    # title from `resolved_prompt`'s "<key>::" prefix for backward compatibility; newer
+    # deliverable types (e.g. requirements-fit) set this directly instead of growing
+    # that ad-hoc encoding further.
+    title = Column(String(255), nullable=True)
+
     # Prompt composition
     resolved_prompt = Column(Text, nullable=False)  # exact text sent to model
     prompt_provenance = Column(
@@ -137,12 +143,25 @@ class GenerationRun(Base):
     judge_rubric = Column(JSON, nullable=True)  # {"evidence_cited": True, "comparator_named": False, ...}
     flagged_for_redraft = Column(Boolean, default=False)
 
+    # Approval lock. Set when a ReviewRound with decision="accept" is recorded against
+    # this run; cleared when a later round reopens it (revise / decline / amend_brief).
+    # While set, refinement is blocked server-side — an approved document does not
+    # change under whoever generated it, only through a new reviewed decision.
+    approved_at = Column(DateTime, nullable=True)
+    approved_by = Column(String(255), nullable=True)
+
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     created_by = Column(String(255), nullable=False)  # user who triggered generation
 
     engagement = relationship("Engagement", back_populates="generation_runs")
     brief_version = relationship("BriefVersion", back_populates="generation_runs")
-    review_rounds = relationship("ReviewRound", back_populates="generation_run")
+    # A dossier section can be deleted-and-replaced on regeneration (see
+    # api_generate_section) — its review history goes with it rather than being
+    # orphaned against a NOT NULL foreign key. An *approved* run is protected from
+    # regeneration in the first place (see the lock check there), so this only
+    # ever discards history for a run that was never signed off.
+    review_rounds = relationship("ReviewRound", back_populates="generation_run",
+                                  cascade="all, delete-orphan")
 
 
 class ReviewRound(Base):

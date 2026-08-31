@@ -14,8 +14,26 @@
                 {{ run.model }}{% if run.provider == 'offline' %} · offline{% endif %}
             </span>
             <span class="badge badge--blue">Round {{ run.round }}</span>
+            {% if run.approved_at %}
+                <span class="badge badge--green">
+                    {{ icons.icon("check-circle", 12) }} Approved by {{ run.approved_by }}
+                </span>
+            {% endif %}
         </div>
     </div>
+
+    {% if run.approved_at %}
+        <div class="alert alert--green mb-6">
+            {{ icons.icon("lock", 20) }}
+            <div class="flex-1">
+                <div class="alert__title">Approved and locked</div>
+                <div class="alert__body">
+                    <p>Approved by {{ run.approved_by }} on {{ run.approved_at.strftime('%b %d, %Y at %H:%M') }}.
+                       Refinement is disabled until a new review reopens it with a "Revise" decision.</p>
+                </div>
+            </div>
+        </div>
+    {% endif %}
 
     <div class="form-grid" style="grid-template-columns:1fr;gap:1.5rem">
         <div class="card">
@@ -43,43 +61,48 @@
                     <p class="card__subtitle">Each refinement increments the round and is logged.</p>
                 </div>
                 <div class="card__body">
-                    <form method="POST" action="{{ url_for('refine_generation', run_id=run.id) }}">
-                        <div class="field">
-                            <label class="field__label" for="instruction">What should change?</label>
-                            <textarea class="textarea textarea--tall" name="instruction" id="instruction" required
-                                      placeholder="Examples:
-- Expand the Spanish market opportunity
-- Emphasise the bolus calculator risk controls
-- Add detail on the CCAA tender scoring criteria
-- Strengthen the indirect-comparison caveat"></textarea>
-                        </div>
-
-                        <div class="form-grid form-grid--2">
+                    {% if run.approved_at %}
+                        <p class="text-sm text-muted">Locked — see the notice above. Submit a
+                           "Revise" review below to reopen this draft.</p>
+                    {% else %}
+                        <form method="POST" action="{{ url_for('refine_generation', run_id=run.id) }}">
                             <div class="field">
-                                <label class="field__label" for="provider">Provider</label>
-                                <select class="select" name="provider" id="provider">
-                                    <option value="offline">Offline simulation (no API key)</option>
-                                    <option value="anthropic">Anthropic</option>
-                                    <option value="openai">OpenAI</option>
-                                    <option value="google">Google (Gemini)</option>
-                                </select>
+                                <label class="field__label" for="instruction">What should change?</label>
+                                <textarea class="textarea textarea--tall" name="instruction" id="instruction" required
+                                          placeholder="Examples:
+- Expand the market opportunity discussion
+- Emphasise a specific risk control
+- Add detail on a scoring criterion
+- Strengthen an evidence caveat"></textarea>
                             </div>
-                            <div class="field">
-                                <label class="field__label" for="model">Model</label>
-                                <input class="input" name="model" id="model" placeholder="Provider default">
+
+                            <div class="form-grid form-grid--2">
+                                <div class="field">
+                                    <label class="field__label" for="provider">Provider</label>
+                                    <select class="select" name="provider" id="provider">
+                                        <option value="offline">Offline simulation (no API key)</option>
+                                        <option value="anthropic">Anthropic</option>
+                                        <option value="openai">OpenAI</option>
+                                        <option value="google">Google (Gemini)</option>
+                                    </select>
+                                </div>
+                                <div class="field">
+                                    <label class="field__label" for="model">Model</label>
+                                    <input class="input" name="model" id="model" placeholder="Provider default">
+                                </div>
                             </div>
-                        </div>
 
-                        <div class="field" id="apiKeyField" hidden>
-                            <label class="field__label" for="api_key">API Key (optional)</label>
-                            <input class="input" type="password" name="api_key" id="api_key"
-                                   placeholder="Used for this request only — never stored">
-                        </div>
+                            <div class="field" id="apiKeyField" hidden>
+                                <label class="field__label" for="api_key">API Key (optional)</label>
+                                <input class="input" type="password" name="api_key" id="api_key"
+                                       placeholder="Used for this request only — never stored">
+                            </div>
 
-                        <button type="submit" class="btn btn--primary btn--block mt-4">
-                            {{ icons.icon("sparkles", 16) }} Refine Output
-                        </button>
-                    </form>
+                            <button type="submit" class="btn btn--primary btn--block mt-4">
+                                {{ icons.icon("sparkles", 16) }} Refine Output
+                            </button>
+                        </form>
+                    {% endif %}
                 </div>
             </div>
 
@@ -101,6 +124,80 @@
                         <a class="link-cta" href="{{ url_for('audit_trail') }}">view in audit trail</a>
                     </p>
                 </div>
+            </div>
+        </div>
+
+        {# --------------------------------------------------- Review & Approval #}
+        <div class="card">
+            <div class="card__header">
+                <h2 class="card__title">Review &amp; Approval</h2>
+                <p class="card__subtitle">Every decision is recorded here and in the audit trail — nothing is overwritten.</p>
+            </div>
+            <div class="card__body">
+                {% if review_rounds %}
+                    <div class="stack-4 mb-6">
+                        {% for round in review_rounds %}
+                            <div class="review-entry review-entry--{{ round.decision }}">
+                                <div class="row row--between" style="gap:.5rem">
+                                    <span class="badge
+                                        {% if round.decision == 'accept' %}badge--green
+                                        {% elif round.decision == 'revise' %}badge--amber
+                                        {% elif round.decision == 'decline' %}badge--red
+                                        {% else %}badge--slate{% endif %}">
+                                        {{ round.decision | replace('_', ' ') | upper }}
+                                    </span>
+                                    <span class="text-xs text-faint">
+                                        {{ round.reviewed_by }} ·
+                                        {{ round.round_type | replace('_', ' ') }} ·
+                                        {{ round.created_at.strftime('%b %d, %Y at %H:%M') }}
+                                    </span>
+                                </div>
+                                {% if round.feedback_text %}
+                                    <p class="text-sm mt-2">{{ round.feedback_text }}</p>
+                                {% endif %}
+                            </div>
+                        {% endfor %}
+                    </div>
+                {% else %}
+                    <p class="text-sm text-muted mb-6">Not yet reviewed.</p>
+                {% endif %}
+
+                {% if can_approve %}
+                    <form method="POST" action="{{ url_for('submit_review', run_id=run.id) }}"
+                          style="padding-top:1.5rem;border-top:1px solid var(--slate-200)">
+                        <div class="form-grid form-grid--2">
+                            <div class="field">
+                                <label class="field__label" for="decision">Decision</label>
+                                <select class="select" name="decision" id="decision" required>
+                                    <option value="accept">Accept — approve and lock</option>
+                                    <option value="revise">Revise — send back with feedback</option>
+                                    <option value="decline">Decline</option>
+                                    <option value="amend_brief">Amend the brief</option>
+                                </select>
+                            </div>
+                            <div class="field">
+                                <label class="field__label" for="round_type">Review Type</label>
+                                <select class="select" name="round_type" id="round_type">
+                                    <option value="internal_expert">Internal expert review</option>
+                                    <option value="client">Client review</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="field">
+                            <label class="field__label" for="feedback_text">Feedback (optional)</label>
+                            <textarea class="textarea" name="feedback_text" id="feedback_text"
+                                      placeholder="What was checked, and why this decision."></textarea>
+                        </div>
+                        <button type="submit" class="btn btn--outline btn--block mt-4">
+                            {{ icons.icon("check-circle", 16) }} Submit Review
+                        </button>
+                    </form>
+                {% else %}
+                    <p class="text-xs text-faint">
+                        {{ current_role_label }} cannot submit reviews. Switch to a role with
+                        approval permission to record a decision.
+                    </p>
+                {% endif %}
             </div>
         </div>
     </div>

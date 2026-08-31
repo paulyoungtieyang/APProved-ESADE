@@ -759,6 +759,17 @@ svg { flex-shrink: 0; }
     background: var(--slate-200); padding: .0625rem .25rem;
     border-radius: var(--radius-sm); font-size: .875em;
 }
+.output .table-wrap { overflow-x: auto; margin: 0 0 1rem; }
+.output .md-table { width: 100%; border-collapse: collapse; font-size: .875rem; }
+.output .md-table th, .output .md-table td {
+    padding: .5rem .75rem; text-align: left; border-bottom: 1px solid var(--slate-200);
+    vertical-align: top;
+}
+.output .md-table th {
+    background: var(--slate-100); color: var(--slate-700); font-weight: 600;
+    white-space: nowrap;
+}
+.output .md-table tbody tr:hover { background: var(--slate-100); }
 
 .meta-grid {
     display: grid; grid-template-columns: repeat(2, 1fr); gap: 1rem;
@@ -809,6 +820,61 @@ svg { flex-shrink: 0; }
 }
 .chip:hover { background: var(--slate-200); }
 .chip.is-active { background: var(--blue-600); color: #fff; }
+
+/* ==========================================================================
+   Evidence readiness — generic "what's uploaded" chips, shown before
+   generation on every generate-a-document page.
+   ========================================================================== */
+
+.readiness-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: .5rem;
+}
+.readiness-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: .4rem;
+    padding: .4rem .75rem;
+    border-radius: var(--radius-full);
+    font-size: .8125rem;
+    font-weight: 500;
+    border: 1px solid var(--slate-200);
+    cursor: default;
+}
+.readiness-chip.is-present {
+    background: var(--green-50);
+    border-color: var(--green-200);
+    color: var(--green-800);
+}
+.readiness-chip.is-missing {
+    background: var(--slate-50);
+    color: var(--slate-500);
+}
+.readiness-chip__icon { display: flex; }
+.readiness-chip.is-missing .readiness-chip__icon { color: var(--slate-400); }
+.readiness-chip__count {
+    background: rgba(255,255,255,.6);
+    border-radius: var(--radius-full);
+    padding: 0 .4rem;
+    font-size: .75rem;
+    font-variant-numeric: tabular-nums;
+}
+
+/* ==========================================================================
+   Review & approval — decision history on a generation result page
+   ========================================================================== */
+
+.review-entry {
+    padding: .75rem 1rem;
+    border-radius: var(--radius);
+    background: var(--slate-50);
+    border-left: 3px solid var(--slate-300);
+}
+.review-entry--accept { border-left-color: var(--green-600); }
+.review-entry--revise { border-left-color: var(--amber-600); }
+.review-entry--decline { border-left-color: var(--red-600); }
+.review-entry--amend_brief { border-left-color: var(--blue-600); }
 
 /* ==========================================================================
    Empty state

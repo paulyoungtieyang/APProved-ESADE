@@ -1,0 +1,196 @@
+{% extends "base.html" %}
+{% import "_icons.html" as icons %}
+{% block title %}Requirements Fit{% endblock %}
+
+{% block content %}
+<div class="page page--sm">
+    <div class="page-header">
+        <h1>Requirements Fit</h1>
+        <p>Match your evidence against any external requirement list — a public tender, an
+           HTA or formulary checklist, a notified-body or partner due-diligence list — and see,
+           requirement by requirement, what's covered and what needs an argument.</p>
+    </div>
+
+    {% include "_evidence_readiness.html" %}
+
+    <form method="POST" id="reqForm">
+        {# ------------------------------------------------------------- Label #}
+        <div class="card mb-6">
+            <div class="card__header">
+                <h2 class="card__title">Name This Analysis</h2>
+            </div>
+            <div class="card__body">
+                <div class="field">
+                    <label class="field__label" for="label">Label</label>
+                    <input class="input" type="text" name="label" id="label" required
+                           placeholder="e.g. Q3 2026 Regional Tender, or Formulary Committee Criteria">
+                    <p class="field__hint">Free text — this is just how the report is filed in
+                        the Document Library, not a category the tool interprets.</p>
+                </div>
+            </div>
+        </div>
+
+        {# --------------------------------------------------------- Requirements #}
+        <div class="card mb-6">
+            <div class="card__header">
+                <h2 class="card__title">Requirement List</h2>
+                <p class="card__subtitle">One per line, or an uploaded file with a "Requirement" column.</p>
+            </div>
+            <div class="card__body">
+                <div class="segmented mb-4">
+                    <span class="segmented__option">
+                        <input type="radio" name="source_mode" value="paste" id="mode-paste" checked>
+                        <label class="segmented__label" for="mode-paste">Paste text</label>
+                    </span>
+                    <span class="segmented__option">
+                        <input type="radio" name="source_mode" value="file" id="mode-file"
+                               {% if not requirements_files %}disabled{% endif %}>
+                        <label class="segmented__label" for="mode-file">Uploaded file</label>
+                    </span>
+                </div>
+
+                <div class="field" id="pasteField">
+                    <label class="field__label" for="requirements_text">Requirements (one per line)</label>
+                    <textarea class="textarea textarea--tall" name="requirements_text" id="requirements_text"
+                              placeholder="Examples:
+- Clinical performance data reported against a recognised reference method
+- Adverse event and safety monitoring data provided for the evaluated population
+- Statistical significance demonstrated for the primary efficacy endpoint
+- Cost-effectiveness analysis submitted for the target purchaser"></textarea>
+                </div>
+
+                <div class="field" id="fileField" hidden>
+                    <label class="field__label" for="requirements_file_id">Uploaded requirements file</label>
+                    <select class="select" name="requirements_file_id" id="requirements_file_id">
+                        {% for file in requirements_files %}
+                            <option value="{{ file.id }}">{{ file.filename }} ({{ file.rows }} rows)</option>
+                        {% endfor %}
+                    </select>
+                    {% if not requirements_files %}
+                        <p class="field__hint">
+                            No file with the "External requirements" category uploaded yet —
+                            <a class="link-cta" href="{{ url_for('upload') }}">upload one</a> with a
+                            "Requirement" column, or paste text instead.
+                        </p>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+
+        {# ------------------------------------------------------- Characteristics #}
+        <div class="card mb-6">
+            <div class="card__header">
+                <h2 class="card__title">Product / Service Characteristics</h2>
+                <p class="card__subtitle">Optional — what makes this different, that the requirement list itself might not capture.</p>
+            </div>
+            <div class="card__body">
+                <div class="field">
+                    <label class="field__label" for="characteristics">Characteristics</label>
+                    <textarea class="textarea" name="characteristics" id="characteristics"
+                              placeholder="Differentiators, facts about your evidence base, or context a reviewer would need to judge a requirement that isn't a clean match."></textarea>
+                </div>
+            </div>
+        </div>
+
+        {# ------------------------------------------------------------- Engine #}
+        <div class="card mb-6">
+            <div class="card__header">
+                <h2 class="card__title">Generation Engine</h2>
+                <p class="card__subtitle">Offline by default — matching runs the same way either way; a live model only writes richer argumentation prose.</p>
+            </div>
+            <div class="card__body">
+                <div class="form-grid form-grid--2">
+                    <div class="field">
+                        <label class="field__label" for="provider">LLM Provider</label>
+                        <select class="select" name="provider" id="provider">
+                            {% for key, provider in providers.items() %}
+                                <option value="{{ key }}">{{ provider.label }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="field">
+                        <label class="field__label" for="model">Model</label>
+                        <select class="select" name="model" id="model"></select>
+                    </div>
+                    <div class="field form-grid__full" id="apiKeyField" hidden>
+                        <label class="field__label" for="api_key">API Key (optional)</label>
+                        <input class="input" type="password" name="api_key" id="api_key"
+                               placeholder="Leave blank to fall back to the offline generator">
+                        <p class="field__hint">Used for this request only. Never stored or logged.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <button type="submit" class="btn btn--primary btn--lg btn--block" id="generateBtn">
+            {{ icons.icon("sparkles", 20) }} Run Requirements Fit
+        </button>
+    </form>
+
+    {# ------------------------------------------------------------- History #}
+    {% if previous_runs %}
+        <div class="card mt-6">
+            <div class="card__header">
+                <h2 class="card__title">Previous Runs</h2>
+            </div>
+            <div class="divide-y">
+                {% for run in previous_runs %}
+                    <div class="file-row">
+                        <div class="file-row__main">
+                            <span style="color:var(--slate-500);display:flex">{{ icons.icon("clipboard-list", 20) }}</span>
+                            <div class="flex-1">
+                                <p class="file-row__name">{{ run.title }}</p>
+                                <p class="file-row__meta">{{ run.created_at.strftime('%b %d, %Y · %H:%M') }}
+                                    {% if run.approved_at %} · <span style="color:var(--green-600)">Approved</span>{% endif %}</p>
+                            </div>
+                        </div>
+                        <a href="{{ url_for('document_detail', run_id=run.id) }}" class="btn btn--outline btn--sm">Open</a>
+                    </div>
+                {% endfor %}
+            </div>
+        </div>
+    {% endif %}
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function () {
+    var PROVIDERS = {{ providers | tojson }};
+    var providerEl = document.getElementById("provider");
+    var modelEl = document.getElementById("model");
+    var apiKeyField = document.getElementById("apiKeyField");
+    var form = document.getElementById("reqForm");
+    var button = document.getElementById("generateBtn");
+    var pasteField = document.getElementById("pasteField");
+    var fileField = document.getElementById("fileField");
+
+    function syncModels() {
+        modelEl.innerHTML = "";
+        (PROVIDERS[providerEl.value].models || []).forEach(function (model) {
+            var option = document.createElement("option");
+            option.value = model;
+            option.textContent = model;
+            modelEl.appendChild(option);
+        });
+        apiKeyField.hidden = providerEl.value === "offline";
+    }
+    providerEl.addEventListener("change", syncModels);
+    syncModels();
+
+    function syncSource() {
+        var useFile = document.getElementById("mode-file").checked;
+        pasteField.hidden = useFile;
+        fileField.hidden = !useFile;
+    }
+    document.getElementById("mode-paste").addEventListener("change", syncSource);
+    document.getElementById("mode-file").addEventListener("change", syncSource);
+    syncSource();
+
+    form.addEventListener("submit", function () {
+        button.disabled = true;
+        button.innerHTML = '<span class="spinner"></span> Matching requirements…';
+    });
+})();
+</script>
+{% endblock %}
