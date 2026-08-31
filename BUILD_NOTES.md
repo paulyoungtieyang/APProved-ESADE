@@ -57,11 +57,6 @@ between the demo and a production system is explicit rather than implied.
 - **Verified**: two templates with different fonts and aspect ratios produce visibly
   different decks; selecting "default theme" produces an unbranded one.
 
-### Device-specific
-- Bolus calculator implementing carb dose + correction dose + CGM trend adjustment − insulin
-  on board, with hypoglycaemia / ketone / falling-trend warnings. **Verified** against hand
-  calculation.
-
 ---
 
 ## Stubbed or simplified
@@ -122,7 +117,6 @@ Each of these was executed against the running app, not assumed:
 - All twelve routes return 200; unknown paths return 404.
 - Ten dossier sections generate, persist and appear in the library.
 - XLSX upload parses to 20 rows × 13 columns; `.exe` is rejected.
-- Bolus calculation matches hand arithmetic (75 g, 210 mg/dL, rising, 1.5 U IOB → 7.7 U).
 - Refinement advances a section from round 1 to round 2 with a revision note.
 - Submission wizard carries state across all five steps and writes to the brief.
 - Role cycling blocks generation for MSL and Compliance Officer with a 403.
@@ -140,5 +134,6 @@ Each of these was executed against the running app, not assumed:
 - Entering the tool and the demo from two independent sessions shows zero cross-contamination:
   the tool's upload/document lists stay empty while the demo's show its 3 files, and vice
   versa; switching workspace and back re-uses each engagement rather than recreating it.
-- Direct navigation to `/bolus-calculator` from the tool workspace redirects to the dashboard
-  with an explanatory flash, and the sidebar hides the link outside demo mode.
+- `/bolus-calculator` returns 404 in both workspaces — the route was removed along with the
+  page; the calculator exists only as uploaded source documentation
+  (`sample_data/bolus_calculator_spec.csv` / `_verification.csv`), never as app functionality.
